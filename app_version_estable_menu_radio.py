@@ -1215,91 +1215,85 @@ def load_project_from_json(json_file):
         ).fillna("").copy()
     
 # ---------------------------------------------------------
-# PANEL SUPERIOR DE PROYECTO
+# SIDEBAR
 # ---------------------------------------------------------
 
-with st.expander("📁 Proyecto / Archivos", expanded=False):
+st.sidebar.header("Proyecto")
 
-    st.markdown("### 1. Cargar guion")
+st.sidebar.markdown("### 1. Cargar guion")
 
-    uploaded_file = st.file_uploader(
-        "Importar guion PDF o FDX",
-        type=["pdf", "fdx"],
-        key="top_script_uploader"
+uploaded_file = st.sidebar.file_uploader(
+    "Importar guion PDF o FDX",
+    type=["pdf", "fdx"],
+    key="sidebar_script_uploader"
+)
+
+if uploaded_file is not None:
+
+    uploaded_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+
+    if st.session_state.get("last_uploaded_file_id") != uploaded_file_id:
+
+        file_extension = uploaded_file.name.split(".")[-1].lower()
+
+        if file_extension == "pdf":
+            script_text = extract_text_from_pdf(uploaded_file)
+            scenes_df, characters_df = detect_scenes_from_pdf_text(script_text)
+            source_type = "PDF"
+
+        elif file_extension == "fdx":
+            script_text, fdx_scenes, fdx_characters = extract_fdx_data(uploaded_file)
+            scenes_df, characters_df = detect_scenes_from_fdx(fdx_scenes, fdx_characters)
+            source_type = "FDX"
+
+        else:
+            script_text = ""
+            scenes_df = pd.DataFrame()
+            characters_df = pd.DataFrame()
+            source_type = "Desconocido"
+
+        st.session_state.script_text = script_text
+        st.session_state.scenes_df = normalize_scenes_df_octavos(scenes_df)
+        st.session_state.characters_df = characters_df
+        st.session_state.source_type = source_type
+        st.session_state.nombre_archivo_guion = uploaded_file.name
+        st.session_state.tipo_archivo_guion = source_type
+        st.session_state.fecha_importacion_guion = datetime.now().isoformat()
+        st.session_state.last_uploaded_file_id = uploaded_file_id
+
+        if not scenes_df.empty:
+            st.sidebar.success("Guion analizado correctamente.")
+        else:
+            st.sidebar.warning("No se detectaron escenas.")
+
+st.sidebar.markdown("### 2. Abrir proyecto guardado")
+
+project_json = st.sidebar.file_uploader(
+    "Abrir proyecto guardado (.json)",
+    type=["json"],
+    key="sidebar_project_uploader"
+)
+
+if project_json is not None:
+    load_project_from_json(project_json)
+    st.sidebar.success("Proyecto cargado correctamente.")
+
+st.sidebar.markdown("### 3. Guardar avances")
+
+if not st.session_state.scenes_df.empty:
+    st.sidebar.download_button(
+        label="Guardar proyecto actual",
+        data=project_to_json(),
+        file_name="proyecto_cineplan.json",
+        mime="application/json"
     )
 
-    if uploaded_file is not None:
-
-        uploaded_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
-
-        if st.session_state.get("last_uploaded_file_id") != uploaded_file_id:
-
-            file_extension = uploaded_file.name.split(".")[-1].lower()
-
-            if file_extension == "pdf":
-                script_text = extract_text_from_pdf(uploaded_file)
-                scenes_df, characters_df = detect_scenes_from_pdf_text(script_text)
-                source_type = "PDF"
-
-            elif file_extension == "fdx":
-                script_text, fdx_scenes, fdx_characters = extract_fdx_data(uploaded_file)
-                scenes_df, characters_df = detect_scenes_from_fdx(fdx_scenes, fdx_characters)
-                source_type = "FDX"
-
-            else:
-                script_text = ""
-                scenes_df = pd.DataFrame()
-                characters_df = pd.DataFrame()
-                source_type = "Desconocido"
-
-            st.session_state.script_text = script_text
-            st.session_state.scenes_df = normalize_scenes_df_octavos(scenes_df)
-            st.session_state.characters_df = characters_df
-            st.session_state.source_type = source_type
-            st.session_state.nombre_archivo_guion = uploaded_file.name
-            st.session_state.tipo_archivo_guion = source_type
-            st.session_state.fecha_importacion_guion = datetime.now().isoformat()
-            st.session_state.last_uploaded_file_id = uploaded_file_id
-
-            if not scenes_df.empty:
-                st.success("Guion analizado correctamente.")
-            else:
-                st.warning("No se detectaron escenas.")
-
-    st.markdown("### 2. Abrir proyecto guardado")
-
-    project_json = st.file_uploader(
-        "Abrir proyecto guardado (.json)",
-        type=["json"],
-        key="top_project_uploader"
+    st.sidebar.caption(
+        "Guarda constantemente los cambios de tu proyecto para continuar trabajando después."
     )
+else:
+    st.sidebar.info("Carga un guion o abre un proyecto para poder guardar.")
 
-    if project_json is not None:
-        load_project_from_json(project_json)
-        st.success("Proyecto cargado correctamente.")
-
-    st.markdown("### 3. Guardar avances")
-
-    if not st.session_state.scenes_df.empty:
-        st.download_button(
-            label="Guardar proyecto actual",
-            data=project_to_json(),
-            file_name="proyecto_cineplan.json",
-            mime="application/json"
-        )
-
-        st.caption(
-            "Guarda constantemente los cambios de tu proyecto para continuar trabajando después."
-        )
-    else:
-        st.info("Carga un guion o abre un proyecto para poder guardar.")
-
-
-# ---------------------------------------------------------
-# SIDEBAR / NAVEGACIÓN
-# ---------------------------------------------------------
-
-st.sidebar.title("CinePlan Scheduler")
 
 # ---------------------------------------------------------
 # PÁGINA DE INICIO
@@ -1335,24 +1329,44 @@ if st.session_state.scenes_df.empty:
         st.metric("Guardado", "JSON")
         st.write("Guarda tu avance y continúa editando después.")
 
-    st.info("Para comenzar, despliega la sección 📁 Proyecto / Archivos. Desde ahí podrás cargar un guion, abrir proyectos guardados y guardar tu progreso.")
+    st.info("Utiliza el menú lateral para importar un guion PDF/FDX o abrir un proyecto guardado.")
 
+
+# ---------------------------------------------------------
+# IMPORTAR GUIÓN
+# ---------------------------------------------------------
+
+if st.session_state.scenes_df.empty:
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Formatos compatibles", "PDF / FDX")
+        st.write("Importa guiones en PDF o Final Draft.")
+
+    with col2:
+        st.metric("Primera etapa", "Importar guion")
+        st.write("Detecta escenas, personajes, locaciones y octavos.")
+
+    with col3:
+        st.metric("Guardado", "JSON")
+        st.write("Guarda tu avance y continúa editando después.")
+
+    st.info("Utiliza el menú lateral para importar un guion PDF/FDX o abrir un proyecto guardado.")
 
 else:
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### Navegación")
-
-    main_menu = st.sidebar.radio(
-        "Módulo",
+    main_menu = st.radio(
+        "Menú principal",
         ["1. Importar y analizar guion", "2. Breakdown"],
+        horizontal=True,
+        label_visibility="collapsed",
         key="main_menu"
     )
 
     if main_menu == "1. Importar y analizar guion":
         st.subheader("Importar guion / Revisión inicial")
 
-        sub_menu = st.sidebar.radio(
-            "Revisión inicial",
+        sub_menu = st.radio(
+            "Submenú",
             [
                 "Proyecto",
                 "Escenas detectadas",
@@ -1362,7 +1376,8 @@ else:
                 "Resumen general",
                 "Guardar / Abrir"
             ],
-            
+            horizontal=True,
+            label_visibility="collapsed",
             key="import_sub_menu"
         )
         
@@ -2071,8 +2086,8 @@ else:
     elif main_menu == "2. Breakdown":
         st.markdown("# Breakdown")
 
-        bd_menu = st.sidebar.radio(
-    "Breakdown",
+        bd_menu = st.radio(
+    "Submenú Breakdown",
     [
         "Datos de escena",
         "Cast / Talento",
