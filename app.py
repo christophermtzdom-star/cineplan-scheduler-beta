@@ -2083,7 +2083,7 @@ else:
         "Notas de producción",
         "Exportar breakdown"
     ],
-    horizontal=True,
+    horizontal=False,
     label_visibility="collapsed",
     key="breakdown_sub_menu"
 )
