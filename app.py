@@ -1364,7 +1364,6 @@ else:
                 "Personajes",
                 "Octavos",
                 "Resumen general",
-                "Guardar / Abrir"
             ],
             
             key="import_sub_menu"
@@ -2059,19 +2058,6 @@ else:
                 use_container_width=True
             )
 
-        elif sub_menu == "Guardar / Abrir":
-            st.markdown("### Guardar / Abrir proyecto")
-
-            st.download_button(
-                label="Guardar proyecto actual en JSON",
-                data=project_to_json(),
-                file_name="proyecto_cineplan.json",
-                mime="application/json"
-            )
-
-            st.info(
-                "Para abrir un proyecto guardado, utiliza el menú lateral en la sección Abrir proyecto guardado."
-            )
     elif main_menu == "2. Breakdown":
         st.markdown("# Breakdown")
 
@@ -4779,21 +4765,96 @@ else:
                     )
                 
 
-                    st.markdown("### Información base de la escena")
+                    st.markdown("### Datos del Strip")
 
-                    col1, col2, col3 = st.columns(3)
+                    datos_escena_strip = st.session_state.get(
+                        "breakdown_scene_data",
+                        {}
+                    ).get(
+                        str(numero_escena_strip),
+                        {}
+                    )
+
+                    strip_merged = {
+                        **escena_strip_data.to_dict(),
+                        **datos_escena_strip
+                    }
+
+                    col1, col2 = st.columns(2)
 
                     with col1:
-                        st.markdown(f"**Escena:** {escena_strip_data.get('Escena', '')}")
-                        st.markdown(f"**I/E:** {escena_strip_data.get('INT/EXT', '')}")
+                        strip_int_ext = st.selectbox(
+                            "I/E",
+                            ["INT.", "EXT.", "I/E.", "ESPECIAL"],
+                            index=["INT.", "EXT.", "I/E.", "ESPECIAL"].index(
+                                strip_merged.get("INT/EXT", "INT.")
+                                if strip_merged.get("INT/EXT", "INT.") in ["INT.", "EXT.", "I/E.", "ESPECIAL"]
+                                else "INT."
+                            ),
+                            key=f"strip_int_ext_{numero_escena_strip}"
+                        )
+
+                        strip_lugar_escena = st.text_input(
+                            "Lugar de escena",
+                            value=str(strip_merged.get("Locación", "")),
+                            key=f"strip_lugar_escena_{numero_escena_strip}"
+                        )
+
+                        strip_locacion_rodaje = st.text_input(
+                            "Locación de rodaje",
+                            value=str(strip_merged.get("Locación rodaje", strip_merged.get("Locación", ""))),
+                            key=f"strip_locacion_rodaje_{numero_escena_strip}"
+                        )
 
                     with col2:
-                        st.markdown(f"**Lugar de escena:** {escena_strip_data.get('Locación', '')}")
-                        st.markdown(f"**Día / Noche:** {escena_strip_data.get('Tiempo', '')}")
+                        strip_tiempo = st.text_input(
+                            "Día / Noche / Tiempo",
+                            value=str(strip_merged.get("Tiempo", "")),
+                            key=f"strip_tiempo_{numero_escena_strip}"
+                        )
 
-                    with col3:
-                        st.markdown(f"**Octavos:** {obtener_octavos_finales(escena_strip_data)}")
-                        st.markdown(f"**Cast:** {escena_strip_data.get('Personajes', '')}")
+                        strip_octavos = st.text_input(
+                            "Octavos",
+                            value=str(obtener_octavos_finales(strip_merged)),
+                            key=f"strip_octavos_{numero_escena_strip}"
+                        )
+
+                        colores_stripboard = [
+                            "Blanco",
+                            "Amarillo",
+                            "Azul",
+                            "Verde",
+                            "Negro",
+                            "Naranja",
+                            "Morado",
+                            "Rosa",
+                            "Gris"
+                        ]
+
+                        strip_color_actual = str(strip_merged.get("Color stripboard", "Blanco"))
+
+                        if strip_color_actual not in colores_stripboard:
+                            strip_color_actual = "Blanco"
+
+                        strip_color = st.selectbox(
+                            "Color Stripboard",
+                            colores_stripboard,
+                            index=colores_stripboard.index(strip_color_actual),
+                            key=f"strip_color_{numero_escena_strip}"
+                        )
+
+                    strip_descripcion = st.text_area(
+                        "Descripción breve",
+                        value=str(strip_merged.get("Descripción", "")),
+                        height=120,
+                        key=f"strip_descripcion_{numero_escena_strip}"
+                    )
+
+                    strip_cast = st.text_input(
+                        "Cast detectado",
+                        value=str(strip_merged.get("Personajes", "")),
+                        key=f"strip_cast_{numero_escena_strip}"
+                    )
 
                 else:
                     st.warning("No se encontró la escena seleccionada.")
