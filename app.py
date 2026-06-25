@@ -17,7 +17,54 @@ st.set_page_config(
     page_title="CinePlan Scheduler",
     layout="wide"
 )
+# ---------------------------------------------------------
+# ESTILOS VISUALES CINEPLAN
+# ---------------------------------------------------------
 
+st.markdown(
+    """
+    <style>
+        .cine-card {
+            background: #111827;
+            border: 1px solid #2D3748;
+            border-radius: 14px;
+            padding: 20px;
+            margin-bottom: 18px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+        }
+
+        .cine-card-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #FFFFFF;
+            margin-bottom: 12px;
+        }
+
+        .cine-card-subtitle {
+            font-size: 13px;
+            color: #AAB4C0;
+            margin-bottom: 16px;
+        }
+
+        .cine-muted {
+            color: #AAB4C0;
+            font-size: 13px;
+        }
+
+        .cine-status-ok {
+            color: #22C55E;
+            font-weight: 700;
+        }
+
+        .cine-divider {
+            height: 1px;
+            background: #2D3748;
+            margin: 16px 0;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 
 
