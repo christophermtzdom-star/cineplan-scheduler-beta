@@ -75,75 +75,21 @@ def render_project_progress(current_step=1):
         ("5", "Hojas de Llamado", "Generar llamados")
     ]
 
-    html_steps = ""
+    st.markdown("### Progreso del proyecto")
 
-    for number, title, subtitle in steps:
-        is_active = int(number) <= current_step
-        circle_bg = "#2E7D32" if is_active else "#1E2633"
-        border = "#4CAF50" if is_active else "#5F6B7A"
-        text_color = "#FFFFFF" if is_active else "#C7CED8"
+    progress_value = current_step / len(steps)
+    st.progress(progress_value)
 
-        html_steps += f"""
-        <div style="display:flex; align-items:center; gap:12px;">
-            <div style="
-                width:38px;
-                height:38px;
-                border-radius:50%;
-                background:{circle_bg};
-                border:1px solid {border};
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                color:white;
-                font-weight:700;
-            ">{number}</div>
+    cols = st.columns(len(steps))
 
-            <div>
-                <div style="font-size:15px; font-weight:700; color:{text_color};">{title}</div>
-                <div style="font-size:12px; color:#8E99A8;">{subtitle}</div>
-            </div>
-        </div>
-        """
+    for index, (number, title, subtitle) in enumerate(steps, start=1):
+        with cols[index - 1]:
+            if index <= current_step:
+                st.success(f"**{number}. {title}**")
+            else:
+                st.info(f"**{number}. {title}**")
 
-        if number != "5":
-            html_steps += """
-            <div style="font-size:26px; color:#657285;">›</div>
-            """
-
-    st.markdown(
-        f"""
-        <div style="
-            width:100%;
-            border:1px solid #263241;
-            background:#111821;
-            border-radius:10px;
-            padding:18px 20px;
-            margin:18px 0 22px 0;
-        ">
-            <div style="
-                font-size:13px;
-                letter-spacing:.06em;
-                text-transform:uppercase;
-                color:#AAB4C0;
-                margin-bottom:18px;
-            ">
-                Progreso del proyecto
-            </div>
-
-            <div style="
-                display:flex;
-                align-items:center;
-                justify-content:space-between;
-                gap:16px;
-                flex-wrap:wrap;
-            ">
-                {html_steps}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
+            st.caption(subtitle)
 def dataframe_to_excel(df):
     output = BytesIO()
 
