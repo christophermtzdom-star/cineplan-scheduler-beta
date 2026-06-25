@@ -1329,47 +1329,7 @@ with st.expander("📁 Proyecto / Archivos", expanded=False):
 # SIDEBAR / NAVEGACIÓN
 # ---------------------------------------------------------
 
-with st.sidebar:
-
-    st.markdown("# 🎬 CinePlan")
-    st.caption("Scheduler")
-
-    st.markdown("---")
-
-    if st.button("🏠 Inicio", use_container_width=True):
-        pass
-
-    st.markdown("### Proyecto")
-
-    nombre = st.session_state.project_info.get(
-        "nombre",
-        "Sin proyecto"
-    )
-
-    st.caption(nombre)
-
-    st.markdown("---")
-
-    st.markdown("### Flujo de trabajo")
-
-    st.markdown("① Importar")
-    st.markdown("② Breakdown")
-    st.markdown("③ Stripboard")
-    st.markdown("④ Rodaje")
-    st.markdown("⑤ Llamados")
-
-    st.markdown("---")
-
-    st.caption("Progreso")
-
-    progreso = 0.0
-
-    if not st.session_state.scenes_df.empty:
-        progreso = 0.20
-
-    st.progress(progreso)
-
-    st.caption("Paso 1 de 5")
+st.sidebar.title("CinePlan Scheduler")
 
 # ---------------------------------------------------------
 # PÁGINA DE INICIO
