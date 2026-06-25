@@ -1433,6 +1433,8 @@ if st.session_state.scenes_df.empty:
 
     st.divider()
 
+    st.markdown('<div class="cine-card">', unsafe_allow_html=True)
+
     st.markdown("### Acciones rápidas")
 
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -1451,6 +1453,7 @@ if st.session_state.scenes_df.empty:
 
     with col5:
         st.button("📞 Hojas de llamado", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     st.divider()
 
