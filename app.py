@@ -1343,10 +1343,14 @@ else:
     st.sidebar.markdown("### Navegación")
 
     main_menu = st.sidebar.radio(
-        "Módulo",
-        ["1. Importar y analizar guion", "2. Breakdown"],
-        key="main_menu"
-    )
+    "Módulo",
+    [
+        "1. Importar y analizar guion",
+        "2. Breakdown",
+        "3. Stripboard"
+    ],
+    key="main_menu"
+)
 
     if main_menu == "1. Importar y analizar guion":
         st.subheader("Importar guion / Revisión inicial")
