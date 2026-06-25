@@ -364,6 +364,24 @@ def normalize_octavos_value(value):
 
 
 def obtener_octavos_finales(escena):
+    # ---------------------------------------------------------
+    # STRIPBOARD
+    # ---------------------------------------------------------
+
+    def get_strip_color(color_nombre):
+        colores = {
+            "Blanco": "#F8F8F8",
+            "Amarillo": "#FFD966",
+            "Azul": "#6FA8DC",
+            "Verde": "#93C47D",
+            "Negro": "#111111",
+            "Naranja": "#F6B26B",
+            "Morado": "#8E7CC3",
+            "Rosa": "#EAD1DC",
+            "Gris": "#B7B7B7"
+        }
+
+        return colores.get(str(color_nombre).strip(), "#F8F8F8")
     if escena is None:
         return ""
 
