@@ -4760,6 +4760,25 @@ else:
 
                     escena_strip_data = escena_df_strip.iloc[0]
 
+                    st.markdown("### Guía de colores recomendados")
+
+                    st.markdown(
+                        """
+                        ⚪ **INT Día** &nbsp; | &nbsp;
+                        🟡 **EXT Día** &nbsp; | &nbsp;
+                        🔵 **INT Noche** &nbsp; | &nbsp;
+                        🟢 **EXT Noche** &nbsp; | &nbsp;
+                        ⚫ **Separador** &nbsp; | &nbsp;
+                        🟠 **Atardecer** &nbsp; | &nbsp;
+                        🟣 **Especial**
+                        """
+                    )
+
+                    st.caption(
+                        'El color se asigna automáticamente desde "Datos de Escena", pero puede modificarse aquí para ajustar la clasificación visual del Stripboard y del Plan de Rodaje.'
+                    )
+                
+
                     st.markdown("### Información base de la escena")
 
                     col1, col2, col3 = st.columns(3)
