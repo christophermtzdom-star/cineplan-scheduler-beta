@@ -4705,4 +4705,37 @@ else:
                     "No hay escenas disponibles."
                 )
 
-       
+     # ---------------------------------------------------------
+     # STRIPBOARD
+     # ---------------------------------------------------------
+
+    elif main_menu == "3. Stripboard":
+
+        st.markdown("# Stripboard")
+
+        strip_menu = st.sidebar.radio(
+            "Stripboard",
+            [
+                "Diseñar Strip",
+                "Stripboard completo"
+            ],
+            horizontal=False,
+            label_visibility="collapsed",
+            key="stripboard_sub_menu"
+        )
+
+        if strip_menu == "Diseñar Strip":
+
+            st.subheader("Diseñar Strip")
+
+            st.info(
+                "Aquí podrás editar los datos de cada escena y visualizar cómo se verá el strip antes de incorporarlo al Stripboard completo."
+            )
+
+        elif strip_menu == "Stripboard completo":
+
+            st.subheader("Stripboard completo")
+
+            st.info(
+                "Aquí se mostrará el Stripboard completo con todas las escenas listas para la planificación del rodaje."
+            )  
