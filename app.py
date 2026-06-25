@@ -61,6 +61,89 @@ if "version_proyecto_json" not in st.session_state:
 # ---------------------------------------------------------
 # FUNCIONES
 # ---------------------------------------------------------
+
+# ---------------------------------------------------------
+# UI / DASHBOARD
+# ---------------------------------------------------------
+
+def render_project_progress(current_step=1):
+    steps = [
+        ("1", "Importar", "Guion PDF / FDX"),
+        ("2", "Breakdown", "Analizar y desglosar"),
+        ("3", "Stripboard", "Diseñar strips"),
+        ("4", "Plan de Rodaje", "Organizar rodaje"),
+        ("5", "Hojas de Llamado", "Generar llamados")
+    ]
+
+    html_steps = ""
+
+    for number, title, subtitle in steps:
+        is_active = int(number) <= current_step
+        circle_bg = "#2E7D32" if is_active else "#1E2633"
+        border = "#4CAF50" if is_active else "#5F6B7A"
+        text_color = "#FFFFFF" if is_active else "#C7CED8"
+
+        html_steps += f"""
+        <div style="display:flex; align-items:center; gap:12px;">
+            <div style="
+                width:38px;
+                height:38px;
+                border-radius:50%;
+                background:{circle_bg};
+                border:1px solid {border};
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                color:white;
+                font-weight:700;
+            ">{number}</div>
+
+            <div>
+                <div style="font-size:15px; font-weight:700; color:{text_color};">{title}</div>
+                <div style="font-size:12px; color:#8E99A8;">{subtitle}</div>
+            </div>
+        </div>
+        """
+
+        if number != "5":
+            html_steps += """
+            <div style="font-size:26px; color:#657285;">›</div>
+            """
+
+    st.markdown(
+        f"""
+        <div style="
+            width:100%;
+            border:1px solid #263241;
+            background:#111821;
+            border-radius:10px;
+            padding:18px 20px;
+            margin:18px 0 22px 0;
+        ">
+            <div style="
+                font-size:13px;
+                letter-spacing:.06em;
+                text-transform:uppercase;
+                color:#AAB4C0;
+                margin-bottom:18px;
+            ">
+                Progreso del proyecto
+            </div>
+
+            <div style="
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:16px;
+                flex-wrap:wrap;
+            ">
+                {html_steps}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 def dataframe_to_excel(df):
     output = BytesIO()
 
@@ -364,24 +447,7 @@ def normalize_octavos_value(value):
 
 
 def obtener_octavos_finales(escena):
-    # ---------------------------------------------------------
-    # STRIPBOARD
-    # ---------------------------------------------------------
-
-    def get_strip_color(color_nombre):
-        colores = {
-            "Blanco": "#F8F8F8",
-            "Amarillo": "#FFD966",
-            "Azul": "#6FA8DC",
-            "Verde": "#93C47D",
-            "Negro": "#111111",
-            "Naranja": "#F6B26B",
-            "Morado": "#8E7CC3",
-            "Rosa": "#EAD1DC",
-            "Gris": "#B7B7B7"
-        }
-
-        return colores.get(str(color_nombre).strip(), "#F8F8F8")
+    
     if escena is None:
         return ""
 
@@ -1325,6 +1391,8 @@ st.sidebar.title("CinePlan Scheduler")
 
 if st.session_state.scenes_df.empty:
     st.title("CinePlan Scheduler by ChrisMaDoX")
+    
+    render_project_progress(current_step=1)
 
     st.markdown("""
     ### Desglose automático de guion y planificación de producción audiovisual
