@@ -4732,10 +4732,52 @@ else:
                 "Aquí podrás editar los datos de cada escena y visualizar cómo se verá el strip antes de incorporarlo al Stripboard completo."
             )
 
-        elif strip_menu == "Stripboard completo":
+            escenas_stripboard = []
 
-            st.subheader("Stripboard completo")
+            for _, row in st.session_state.scenes_df.iterrows():
+                numero = str(row.get("Escena", ""))
+                encabezado = str(row.get("Encabezado de escena", ""))
 
-            st.info(
-                "Aquí se mostrará el Stripboard completo con todas las escenas listas para la planificación del rodaje."
-            )  
+                escenas_stripboard.append(
+                    f"{numero} | {encabezado}"
+                )
+
+            if escenas_stripboard:
+
+                escena_seleccionada_strip = st.selectbox(
+                    "Seleccionar escena",
+                    escenas_stripboard,
+                    key="stripboard_scene_selector"
+                )
+
+                numero_escena_strip = escena_seleccionada_strip.split(" | ")[0]
+
+                escena_df_strip = st.session_state.scenes_df[
+                    st.session_state.scenes_df["Escena"].astype(str) == numero_escena_strip
+                ]
+
+                if not escena_df_strip.empty:
+
+                    escena_strip_data = escena_df_strip.iloc[0]
+
+                    st.markdown("### Información base de la escena")
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.markdown(f"**Escena:** {escena_strip_data.get('Escena', '')}")
+                        st.markdown(f"**I/E:** {escena_strip_data.get('INT/EXT', '')}")
+
+                    with col2:
+                        st.markdown(f"**Lugar de escena:** {escena_strip_data.get('Locación', '')}")
+                        st.markdown(f"**Día / Noche:** {escena_strip_data.get('Tiempo', '')}")
+
+                    with col3:
+                        st.markdown(f"**Octavos:** {obtener_octavos_finales(escena_strip_data)}")
+                        st.markdown(f"**Cast:** {escena_strip_data.get('Personajes', '')}")
+
+                else:
+                    st.warning("No se encontró la escena seleccionada.")
+
+            else:
+                st.warning("No hay escenas disponibles para Stripboard.")
