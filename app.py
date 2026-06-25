@@ -1433,27 +1433,26 @@ if st.session_state.scenes_df.empty:
 
     st.divider()
 
-    st.markdown('<div class="cine-card">', unsafe_allow_html=True)
+    with st.container(border=True):
 
-    st.markdown("### Acciones rápidas")
+        st.markdown("### Acciones rápidas")
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
-    with col1:
-        st.button("📄 Importar guion", use_container_width=True)
+        with col1:
+            st.button("📄 Importar guion", use_container_width=True)
 
-    with col2:
-        st.button("📋 Breakdown", use_container_width=True)
+        with col2:
+            st.button("📋 Breakdown", use_container_width=True)
 
-    with col3:
-        st.button("🎞 Stripboard", use_container_width=True)
+        with col3:
+            st.button("🎞 Stripboard", use_container_width=True)
 
-    with col4:
-        st.button("📅 Plan de rodaje", use_container_width=True)
+        with col4:
+            st.button("📅 Plan de rodaje", use_container_width=True)
 
-    with col5:
-        st.button("📞 Hojas de llamado", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        with col5:
+            st.button("📞 Hojas de llamado", use_container_width=True)
 
     st.divider()
 
