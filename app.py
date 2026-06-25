@@ -1380,34 +1380,58 @@ if st.session_state.scenes_df.empty:
     
     render_project_progress(current_step=1)
 
-    st.markdown("""
-    ### Desglose automático de guion y planificación de producción audiovisual
-
-    CinePlan Scheduler es una herramienta diseñada para organizar guiones cinematográficos y audiovisuales a partir de archivos PDF o FDX. Su objetivo es facilitar el proceso de preproducción mediante la detección de escenas, personajes, locaciones, octavos y datos básicos del guion.
-
-    A partir de esta información, la plataforma permite revisar, corregir y validar el análisis inicial del guion antes de pasar a breakdown, plan de rodaje, horarios de grabación y hojas de llamado.
-    """)
+    st.markdown(
+        "Planifica toda la preproducción de tu proyecto cinematográfico desde un único lugar."
+    )
 
     st.divider()
 
-    # ---------------------------------------------------------
-    # IMPORTAR GUIÓN (pantalla inicial sin proyecto)
-    # ---------------------------------------------------------
-    col1, col2, col3 = st.columns(3)
+    st.markdown("### Acciones rápidas")
+
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
-        st.metric("Formatos compatibles", "PDF / FDX")
-        st.write("Importa guiones en PDF o Final Draft.")
+        st.button("📄 Importar guion", use_container_width=True)
 
     with col2:
-        st.metric("Primera etapa", "Importar guion")
-        st.write("Detecta escenas, personajes, locaciones y octavos.")
+        st.button("📋 Breakdown", use_container_width=True)
 
     with col3:
-        st.metric("Guardado", "JSON")
-        st.write("Guarda tu avance y continúa editando después.")
+        st.button("🎞 Stripboard", use_container_width=True)
 
-    st.info("Para comenzar, despliega la sección 📁 Proyecto / Archivos. Desde ahí podrás cargar un guion, abrir proyectos guardados y guardar tu progreso.")
+    with col4:
+        st.button("📅 Plan de rodaje", use_container_width=True)
+
+    with col5:
+        st.button("📞 Hojas de llamado", use_container_width=True)
+
+    st.divider()
+
+    col_estado, col_guia = st.columns([1, 1])
+
+    with col_estado:
+        st.markdown("### Estado del proyecto")
+
+        st.write(f"**Proyecto:** {st.session_state.project_info.get('nombre', 'Proyecto sin título')}")
+        st.write("**Guion:** Sin importar")
+        st.write("**Escenas:** 0")
+        st.write("**Personajes:** 0")
+        st.write("**Locaciones:** 0")
+        st.write("**Último guardado:** -")
+
+    with col_guia:
+        st.markdown("### Guía rápida")
+
+        st.write("① Crea o abre un proyecto.")
+        st.write("② Importa un guion PDF o FDX.")
+        st.write("③ Revisa escenas, personajes y locaciones.")
+        st.write("④ Continúa al Breakdown.")
+        st.write("⑤ Diseña el Stripboard.")
+        st.write("⑥ Genera plan de rodaje y hojas de llamado.")
+
+    st.info(
+        "Para comenzar, despliega la sección 📁 Proyecto / Archivos. Desde ahí podrás cargar un guion, abrir proyectos guardados y guardar tu progreso."
+    )
 
 
 else:
