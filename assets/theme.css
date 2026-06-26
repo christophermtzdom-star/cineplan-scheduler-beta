@@ -1,0 +1,101 @@
+/* ==========================================================
+   CinePlan Scheduler
+   Design System v1.0
+   ========================================================== */
+
+/* ==========================================================
+   VARIABLES GLOBALES
+   ========================================================== */
+
+:root{
+
+    /* ---------- COLORES ---------- */
+
+    --cp-background:#0F172A;
+
+    --cp-surface:#111827;
+
+    --cp-surface-2:#1F2937;
+
+    --cp-primary:#22C55E;
+
+    --cp-secondary:#3B82F6;
+
+    --cp-warning:#F59E0B;
+
+    --cp-danger:#EF4444;
+
+    --cp-text:#E5E7EB;
+
+    --cp-text-secondary:#94A3B8;
+
+    --cp-border:#263241;
+
+    /* ---------- RADIOS ---------- */
+
+    --cp-radius-xs:6px;
+
+    --cp-radius-sm:10px;
+
+    --cp-radius-md:14px;
+
+    --cp-radius-lg:20px;
+
+    /* ---------- ESPACIADO ---------- */
+
+    --cp-space-xs:4px;
+
+    --cp-space-sm:8px;
+
+    --cp-space-md:16px;
+
+    --cp-space-lg:24px;
+
+    --cp-space-xl:32px;
+
+    /* ---------- SOMBRAS ---------- */
+
+    --cp-shadow-sm:
+        0 2px 6px rgba(0,0,0,.18);
+
+    --cp-shadow-md:
+        0 8px 20px rgba(0,0,0,.25);
+
+    --cp-shadow-lg:
+        0 20px 45px rgba(0,0,0,.35);
+
+}
+
+
+/* ==========================================================
+   ESTILOS BASE
+   ========================================================== */
+
+html,
+body,
+[class*="css"]{
+
+    font-family:
+        Inter,
+        "Segoe UI",
+        sans-serif;
+
+}
+
+
+[data-testid="stAppViewContainer"]{
+
+    background:
+
+    var(--cp-background);
+
+}
+
+
+[data-testid="stSidebar"]{
+
+    background:
+
+    var(--cp-surface);
+
+}
