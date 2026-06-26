@@ -12,7 +12,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 from datetime import datetime
 from pathlib import Path
-from components.ui import cine_header
+from components.ui import cine_header, cine_card, cine_action_card
 def load_theme():
     css_folder = Path("assets")
 
@@ -1416,26 +1416,24 @@ if st.session_state.scenes_df.empty:
 
     st.divider()
 
-    with st.container(border=True):
+    st.markdown("### Acciones rápidas")
 
-        st.markdown("### Acciones rápidas")
+    col1, col2, col3, col4, col5 = st.columns(5)
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+    with col1:
+        cine_action_card("Importar Guion", "Carga PDF o FDX.", "📄", "Iniciar")
 
-        with col1:
-            st.button("📄 Importar guion", use_container_width=True)
+    with col2:
+        cine_action_card("Breakdown", "Desglose por departamentos.", "📋", "Abrir")
 
-        with col2:
-            st.button("📋 Breakdown", use_container_width=True)
+    with col3:
+        cine_action_card("Stripboard", "Organiza escenas visualmente.", "🎞", "Diseñar")
 
-        with col3:
-            st.button("🎞 Stripboard", use_container_width=True)
+    with col4:
+        cine_action_card("Plan de Rodaje", "Ordena escenas por jornadas.", "📅", "Planear")
 
-        with col4:
-            st.button("📅 Plan de rodaje", use_container_width=True)
-
-        with col5:
-            st.button("📞 Hojas de llamado", use_container_width=True)
+    with col5:
+        cine_action_card("Hojas de Llamado", "Prepara llamados de producción.", "📞", "Generar")
 
     st.divider()
 
