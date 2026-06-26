@@ -1,0 +1,33 @@
+.cine-header{
+    display:flex;
+    align-items:center;
+    gap:16px;
+    padding:22px 0 18px 0;
+    border-bottom:1px solid var(--cp-border);
+    margin-bottom:24px;
+}
+
+.cine-header-icon{
+    width:48px;
+    height:48px;
+    border-radius:14px;
+    background:var(--cp-surface);
+    border:1px solid var(--cp-border);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:26px;
+}
+
+.cine-header-title{
+    margin:0;
+    font-size:32px;
+    font-weight:800;
+    color:var(--cp-text);
+}
+
+.cine-header-subtitle{
+    margin:4px 0 0 0;
+    color:var(--cp-text-secondary);
+    font-size:15px;
+}

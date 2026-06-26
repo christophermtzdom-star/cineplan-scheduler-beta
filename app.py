@@ -12,6 +12,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 from datetime import datetime
 from pathlib import Path
+from components.ui import cine_header
 def load_theme():
     css_folder = Path("assets")
 
@@ -1401,7 +1402,11 @@ with st.sidebar:
 # ---------------------------------------------------------
 
 if st.session_state.scenes_df.empty:
-    st.title("CinePlan Scheduler by ChrisMaDoX")
+    cine_header(
+    title="CinePlan Scheduler",
+    subtitle="Planifica toda la preproducción de tu proyecto cinematográfico desde un único lugar.",
+    icon="🎬"
+)
     
     render_project_progress(current_step=1)
 
