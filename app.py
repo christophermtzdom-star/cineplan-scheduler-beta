@@ -1416,24 +1416,26 @@ if st.session_state.scenes_df.empty:
 
     st.divider()
 
-    st.markdown("### Acciones rápidas")
+    with st.container(border=True):
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+        st.markdown("### Acciones rápidas")
 
-    with col1:
-        cine_action_card("Importar Guion", "Carga PDF o FDX.", "📄", "Iniciar")
+        col1, col2, col3, col4, col5 = st.columns(5)
 
-    with col2:
-        cine_action_card("Breakdown", "Desglose por departamentos.", "📋", "Abrir")
+        with col1:
+            cine_action_card("Importar Guion", "Carga PDF o FDX.", "description", "Iniciar")
 
-    with col3:
-        cine_action_card("Stripboard", "Organiza escenas visualmente.", "🎞", "Diseñar")
+        with col2:
+            cine_action_card("Breakdown", "Desglose por departamentos.", "checklist", "Abrir")
 
-    with col4:
-        cine_action_card("Plan de Rodaje", "Ordena escenas por jornadas.", "📅", "Planear")
+        with col3:
+            cine_action_card("Stripboard", "Organiza escenas visualmente.", "view_agenda", "Diseñar")
 
-    with col5:
-        cine_action_card("Hojas de Llamado", "Prepara llamados de producción.", "📞", "Generar")
+        with col4:
+            cine_action_card("Plan de Rodaje", "Ordena escenas por jornadas.", "calendar_month", "Planear")
+
+        with col5:
+            cine_action_card("Hojas de Llamado", "Prepara llamados de producción.", "assignment", "Generar")
 
     st.divider()
 

@@ -1,4 +1,10 @@
 import streamlit as st
+def cine_icon(name, size=32, color="currentColor"):
+    return f"""
+    <span class="material-symbols-rounded" style="font-size:{size}px; color:{color};">
+        {name}
+    </span>
+    """
 
 
 def cine_header(title, subtitle="", icon=""):
@@ -25,7 +31,20 @@ def cine_card(title, subtitle="", icon="", accent="primary"):
         """,
         unsafe_allow_html=True
     )
-def cine_action_card(title, subtitle="", icon="", action_text="Abrir"):
+def cine_action_card(title, subtitle="", icon="description", action_text="Abrir"):
+    icon_html = cine_icon(icon, size=38)
+
+    st.markdown(
+        f"""
+        <div class="cine-action-card">
+            <div class="cine-action-icon">{icon_html}</div>
+            <div class="cine-action-title">{title}</div>
+            <div class="cine-action-subtitle">{subtitle}</div>
+            <div class="cine-action-footer">{action_text} →</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     st.markdown(
         f"""
         <div class="cine-action-card">
