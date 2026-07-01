@@ -1,0 +1,3 @@
+.cine-dashboard-panel div[data-testid="stVerticalBlockBorderWrapper"]{
+    min-height:340px;
+}

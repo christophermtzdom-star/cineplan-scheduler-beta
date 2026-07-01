@@ -32,15 +32,24 @@
     line-height:1.35;
 }
 
+
+/* =========================================================
+   ACTION CARDS
+========================================================= */
+
 .cine-action-card{
     background:var(--cp-surface);
     border:1px solid var(--cp-border);
-    border-radius:var(--cp-radius-md);
-    padding:22px;
-    min-height:170px;
+    border-radius:14px;
+    padding:14px;
+    min-height:95px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
     box-shadow:var(--cp-shadow-sm);
-    transition:all .18s ease;
+    transition:.18s;
     cursor:pointer;
+    margin-bottom:10px;
 }
 
 .cine-action-card:hover{
@@ -49,30 +58,43 @@
     box-shadow:var(--cp-shadow-md);
 }
 
+.cine-action-header{
+    display:flex;
+    align-items:center;
+    gap:12px;
+}
+
 .cine-action-icon{
-    font-size:36px;
-    margin-bottom:18px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    width:36px;
 }
 
 .cine-action-title{
-    font-size:18px;
-    font-weight:800;
+    font-size:14px;
+    font-weight:700;
     color:var(--cp-text);
-    margin-bottom:6px;
 }
 
 .cine-action-subtitle{
-    font-size:13px;
+    font-size:11px;
     color:var(--cp-text-secondary);
-    line-height:1.35;
-    min-height:38px;
+    margin-top:2px;
 }
 
 .cine-action-footer{
-    margin-top:18px;
-    padding-top:12px;
+    margin-top:10px;
+    padding-top:8px;
     border-top:1px solid var(--cp-border);
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
     color:var(--cp-primary);
-    font-size:13px;
+    font-size:12px;
     font-weight:700;
+}
+
+.cine-action-footer .material-symbols-rounded{
+    font-size:18px;
 }

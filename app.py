@@ -12,7 +12,26 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
 from datetime import datetime
 from pathlib import Path
-from components.ui import cine_header, cine_card, cine_action_card
+from components.ui import (
+    cine_header,
+    cine_dashboard_header,
+    cine_topbar,
+    cine_card,
+    cine_action_card,
+    cine_panel
+)
+from components.import_dialog import import_dialog
+from modules.review_page import render_review_page
+
+from project.project_state import get_dashboard_data
+from project.importer import (
+    import_script,
+    normalize_octavos_value,
+    normalize_scene_octavos_fields,
+    normalize_scenes_df_octavos,
+    number_to_octavos
+)
+
 def load_theme():
     css_folder = Path("assets")
 
@@ -23,7 +42,9 @@ def load_theme():
         "cards.css",
         "buttons.css",
         "tables.css",
+        "panel.css",
         "stripboard.css"
+
     ]
 
     css = ""
@@ -45,7 +66,14 @@ st.set_page_config(
     page_title="CinePlan Scheduler",
     layout="wide"
 )
+st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded"
+      rel="stylesheet">
+""", unsafe_allow_html=True)
 load_theme()
+
+if "uploaded_script" not in st.session_state:
+    st.session_state.uploaded_script = None
 
 # ---------------------------------------------------------
 # ESTADO
@@ -83,6 +111,9 @@ if "fecha_importacion_guion" not in st.session_state:
 if "version_proyecto_json" not in st.session_state:
     st.session_state.version_proyecto_json = "1.1"
 
+if "current_view" not in st.session_state:
+    st.session_state.current_view = "dashboard"
+
 
 # ---------------------------------------------------------
 # FUNCIONES
@@ -92,30 +123,49 @@ if "version_proyecto_json" not in st.session_state:
 # UI / DASHBOARD
 # ---------------------------------------------------------
 
-def render_project_progress(current_step=1):
+def render_project_progress(workflow):
+
+    st.markdown("### Flujo de trabajo del proyecto")
+
     steps = [
-        ("1", "Importar", "Guion PDF / FDX"),
-        ("2", "Breakdown", "Analizar y desglosar"),
-        ("3", "Stripboard", "Diseñar strips"),
-        ("4", "Plan de Rodaje", "Organizar rodaje"),
-        ("5", "Hojas de Llamado", "Generar llamados")
+        ("importar", "upload", "1", "Importar guion", "PDF / FDX"),
+        ("revision", "fact_check", "2", "Revisar", "Escenas, personajes y locaciones"),
+        ("breakdown", "calendar_month", "3", "Breakdown", "Desglose por departamentos"),
+        ("stripboard", "grid_view", "4", "Stripboard", "Orden de filmación"),
+        ("plan_rodaje", "event", "5", "Plan de rodaje", "Calendario"),
+        ("hojas_llamado", "description", "6", "Hojas de llamado", "Call Sheets"),
     ]
-
-    st.markdown("### Progreso del proyecto")
-
-    progress_value = current_step / len(steps)
-    st.progress(progress_value)
 
     cols = st.columns(len(steps))
 
-    for index, (number, title, subtitle) in enumerate(steps, start=1):
-        with cols[index - 1]:
-            if index <= current_step:
-                st.success(f"**{number}. {title}**")
-            else:
-                st.info(f"**{number}. {title}**")
+    for col, (key, icon_name, number, title, subtitle) in zip(cols, steps):
 
-            st.caption(subtitle)
+        status = workflow.get(key, "bloqueado")
+
+        if status == "completado":
+            status_label = "Completado"
+            status_color = "#22c55e"
+        elif status == "en_progreso":
+            status_label = "En progreso"
+            status_color = "#f8b400"
+        else:
+            status_label = "Bloqueado"
+            status_color = "#94a3b8"
+
+        with col:
+            card_html = f"""<div style="border:1px solid rgba(148,163,184,.20); border-radius:16px; padding:18px; min-height:165px; background:rgba(15,23,42,.75);">
+<div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+<span class="material-symbols-rounded" style="font-size:30px; color:{status_color};">{icon_name}</span>
+<span style="font-size:22px; font-weight:700; color:white;">{number}</span>
+</div>
+<div style="font-size:18px; font-weight:700; color:white; margin-bottom:6px;">{title}</div>
+<div style="font-size:12px; color:#94a3b8; min-height:34px;">{subtitle}</div>
+<div style="margin-top:18px; font-size:13px; font-weight:600; color:{status_color};">{status_label}</div>
+</div>"""
+
+            st.markdown(card_html, unsafe_allow_html=True)
+
+            
 def dataframe_to_excel(df):
     output = BytesIO()
 
@@ -360,64 +410,6 @@ def octavos_to_number(value):
         return 0
 
 
-def number_to_octavos(total):
-    pages = total // 8
-    eighths = total % 8
-
-    if pages == 0:
-        return f"{eighths}/8"
-    elif eighths == 0:
-        return f"{pages}"
-    else:
-        return f"{pages} {eighths}/8"
-
-
-def normalize_length_to_octavos(length_value):
-    value = str(length_value).strip()
-
-    if not value:
-        return "1/8"
-
-    if "/" in value:
-        return value
-
-    try:
-        number = float(value)
-        return number_to_octavos(round(number * 8))
-    except:
-        return "1/8"
-    
-def estimate_octavos_from_text(scene_text):
-    lines = [
-        line for line in scene_text.split("\n")
-        if line.strip()
-    ]
-
-    line_count = len(lines)
-    estimated_eighths = max(1, round(line_count / 7))
-    return number_to_octavos(estimated_eighths)
-
-
-def normalize_octavos_value(value):
-    if value is None:
-        return ""
-
-    try:
-        if pd.isna(value):
-            return ""
-    except Exception:
-        pass
-
-    normalized = str(value).strip()
-    if not normalized:
-        return ""
-
-    if normalized.lower() in {"nan", "none"}:
-        return ""
-
-    return normalized
-
-
 def obtener_octavos_finales(escena):
     
     if escena is None:
@@ -440,62 +432,6 @@ def obtener_octavos_finales(escena):
     if legacy:
         return legacy
     return ""
-
-
-def normalize_scene_octavos_fields(scene):
-    scene = dict(scene)
-
-    auto = normalize_octavos_value(scene.get("octavos_auto", ""))
-    manual = normalize_octavos_value(scene.get("octavos_manual", ""))
-    final = normalize_octavos_value(scene.get("octavos_final", ""))
-    direct = normalize_octavos_value(scene.get("Octavos", ""))
-    legacy = normalize_octavos_value(scene.get("octavos", ""))
-
-    if not auto:
-        auto = direct or legacy or final
-
-    if manual:
-        final = manual
-    elif not final:
-        final = auto
-
-    final = final or ""
-
-    return pd.Series({
-        "octavos_auto": auto,
-        "octavos_manual": manual,
-        "octavos_final": final,
-        "Octavos": final
-    })
-
-
-def normalize_scenes_df_octavos(scenes_df):
-    df = scenes_df.copy()
-
-    for col in [
-        "octavos_auto",
-        "octavos_manual",
-        "octavos_final",
-        "Octavos",
-        "octavos"
-    ]:
-        if col not in df.columns:
-            df[col] = ""
-
-    normalized = df.apply(normalize_scene_octavos_fields, axis=1)
-    df[[
-        "octavos_auto",
-        "octavos_manual",
-        "octavos_final",
-        "Octavos"
-    ]] = normalized[[
-        "octavos_auto",
-        "octavos_manual",
-        "octavos_final",
-        "Octavos"
-    ]]
-
-    return df
 
 
 def serialize_nested_value(value):
@@ -606,268 +542,6 @@ def get_default_validation_checklist():
         {"Área": "Preparación para Breakdown", "Elemento a revisar": "Observaciones de revisión cerradas", "Estado": "Pendiente", "Comentarios": "", "Última actualización": ""}
     ])
 
-
-def extract_text_from_pdf(pdf_file):
-    text = ""
-
-    with pdfplumber.open(pdf_file) as pdf:
-        for page_number, page in enumerate(pdf.pages, start=1):
-            page_text = page.extract_text()
-
-            if page_text:
-                text += f"\n--- PÁGINA {page_number} ---\n"
-                text += page_text + "\n"
-
-    return text
-
-
-def get_xml_text(element):
-    texts = []
-
-    for text_node in element.iter():
-        if text_node.text:
-            texts.append(text_node.text)
-
-    return " ".join(texts).strip()
-
-
-def extract_fdx_data(fdx_file):
-    raw = fdx_file.read()
-    root = ET.fromstring(raw)
-
-    paragraphs = []
-
-    for paragraph in root.iter():
-        tag_name = paragraph.tag.split("}")[-1]
-
-        if tag_name == "Paragraph":
-            paragraph_type = paragraph.attrib.get("Type", "")
-            paragraph_number = paragraph.attrib.get("Number", "")
-            paragraph_length = paragraph.attrib.get("Length", "")
-            paragraph_text = get_xml_text(paragraph)
-
-            if paragraph_text:
-                paragraphs.append({
-                    "type": paragraph_type,
-                    "number": paragraph_number,
-                    "length": paragraph_length,
-                    "text": paragraph_text
-                })
-
-    script_lines = []
-    scenes = []
-    current_scene = None
-    characters = set()
-
-    for p in paragraphs:
-        script_lines.append(p["text"])
-
-        if p["type"] == "Scene Heading":
-            if current_scene:
-                scenes.append(current_scene)
-
-            current_scene = {
-                "header": p["text"],
-                "number": p["number"],
-                "length": p["length"],
-                "text": p["text"] + "\n",
-                "characters": set()
-            }
-
-        elif current_scene:
-            current_scene["text"] += p["text"] + "\n"
-
-            if p["type"] == "Character":
-                character = p["text"].strip().upper()
-                characters.add(character)
-                current_scene["characters"].add(character)
-
-    if current_scene:
-        scenes.append(current_scene)
-
-    return "\n".join(script_lines), scenes, sorted(characters)
-
-
-def parse_scene_heading(header):
-    tipo = ""
-    header_upper = header.upper()
-
-    if (
-        header_upper.startswith("INT./EXT.")
-        or header_upper.startswith("INT/EXT.")
-        or header_upper.startswith("I/E.")
-    ):
-        tipo = "I/E."
-    elif header_upper.startswith("INT."):
-        tipo = "INT."
-    elif header_upper.startswith("EXT."):
-        tipo = "EXT."
-
-    parts = re.split(r'\s-\s|\s–\s', header)
-
-    location = parts[0]
-    location = (
-        location
-        .replace("INT./EXT.", "")
-        .replace("INT/EXT.", "")
-        .replace("I/E.", "")
-        .replace("INT.", "")
-        .replace("EXT.", "")
-        .strip()
-    )
-
-    time = parts[1].strip() if len(parts) > 1 else ""
-
-    header = header.upper()
-    location = location.upper()
-    time = time.upper()
-    tipo = tipo.upper()
-
-    return tipo, location, time
-
-
-def split_script_into_scenes(script_text):
-    headers = re.findall(
-        r'((INT\.|EXT\.|INT\/EXT\.|INT\.\/EXT\.|I\/E\.|FLASH|FLASHBACK|SUEÑO|VISIÓN|MONTAJE|SECUENCIA|PESADILLA|RECUERDO)\s*[-–]?\s*.+)',
-        script_text
-    )
-
-    scenes = []
-
-    for i, header_match in enumerate(headers):
-        header = header_match[0].strip()
-        start = script_text.find(header)
-
-        if i + 1 < len(headers):
-            end = script_text.find(headers[i + 1][0], start + len(header))
-        else:
-            end = len(script_text)
-
-        scene_text = script_text[start:end].strip()
-
-        page_match = re.findall(r'--- PÁGINA (\d+) ---', script_text[:start])
-        page_number = page_match[-1] if page_match else ""
-
-        scenes.append({
-            "header": header,
-            "text": scene_text,
-            "page": page_number
-        })
-
-    return scenes
-
-
-def detect_characters_from_text(script_text):
-    candidates = re.findall(
-        r'^\s*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{1,35})\s*$',
-        script_text,
-        re.MULTILINE
-    )
-
-    ignored = {
-        "INT", "EXT", "I/E", "DIA", "DÍA", "NOCHE", "CONTINUO",
-        "CORTE A", "FADE IN", "FADE OUT", "DISOLVENCIA",
-        "FLASHBACK", "PRESENTE", "FIN", "THE END", "INSERT", "CUT TO"
-    }
-
-    clean = []
-
-    for name in candidates:
-        name = name.strip()
-
-        if name not in ignored and len(name.split()) <= 4:
-            clean.append(name)
-
-    unique_characters = sorted(set(clean))
-
-    return {
-        name: index + 1
-        for index, name in enumerate(unique_characters)
-    }
-
-
-def detect_scene_characters(scene_text, character_map):
-    detected = []
-
-    for name, number in character_map.items():
-        if re.search(rf'\b{name}\b', scene_text):
-            detected.append(f"#{number} {name}")
-
-    return ", ".join(detected)
-
-
-def detect_scenes_from_pdf_text(script_text):
-    scene_blocks = split_script_into_scenes(script_text)
-    character_map = detect_characters_from_text(script_text)
-
-    scenes = []
-
-    for index, scene in enumerate(scene_blocks, start=1):
-        header = scene["header"]
-        tipo, location, time = parse_scene_heading(header)
-
-        scenes.append({
-            "Orden": index,
-            "Escena": index,
-            "Encabezado de escena": header.upper(),
-            "INT/EXT": tipo.upper(),
-            "Tiempo": time.upper(),
-            "Locación": location.upper(),
-            "Octavos": estimate_octavos_from_text(scene["text"]),
-            "Página": scene.get("page", ""),
-            "Personajes": detect_scene_characters(scene["text"], character_map),
-            "Estado": "Pendiente de revisión",
-            "Notas": ""
-        })
-
-    characters_df = pd.DataFrame([
-        {"ID": number, "Personaje": name}
-        for name, number in character_map.items()
-    ])
-
-    scenes_df = normalize_scenes_df_octavos(pd.DataFrame(scenes))
-    return scenes_df, characters_df
-
-
-def detect_scenes_from_fdx(fdx_scenes, fdx_characters):
-    character_map = {
-        name: index + 1
-        for index, name in enumerate(sorted(fdx_characters))
-    }
-
-    scenes = []
-
-    for index, scene in enumerate(fdx_scenes, start=1):
-        header = scene["header"]
-        tipo, location, time = parse_scene_heading(header)
-
-        scene_characters = []
-
-        for character in sorted(scene["characters"]):
-            if character in character_map:
-                scene_characters.append(f"#{character_map[character]} {character}")
-
-        scenes.append({
-            "Orden": index,
-            "Escena": index,
-            "Encabezado de escena": header.upper(),
-            "INT/EXT": tipo.upper(),
-            "Tiempo": time.upper(),
-            "Locación": location.upper(),
-            "Octavos": normalize_length_to_octavos(scene.get("length", "")) if scene.get("length", "") else estimate_octavos_from_text(scene["text"]),
-            "Página": "",
-            "Personajes": ", ".join(scene_characters),
-            "Estado": "Pendiente de revisión",
-            "Notas": ""
-        })
-
-    characters_df = pd.DataFrame([
-        {"ID": number, "Personaje": name}
-        for name, number in character_map.items()
-    ])
-
-    scenes_df = normalize_scenes_df_octavos(pd.DataFrame(scenes))
-    return scenes_df, characters_df
 
 def ensure_cast_structure(numero_escena, personajes_detectados=""):
 
@@ -1269,88 +943,43 @@ def load_project_from_json(json_file):
         st.session_state.validation_checklist = pd.DataFrame(
             st.session_state.validation_checklist
         ).fillna("").copy()
-    
-# ---------------------------------------------------------
-# PANEL SUPERIOR DE PROYECTO
-# ---------------------------------------------------------
+# =========================================================
+# TOP BAR
+# =========================================================
 
-with st.expander("📁 Proyecto / Archivos", expanded=False):
-
-    st.markdown("### 1. Cargar guion")
-
-    uploaded_file = st.file_uploader(
-        "Importar guion PDF o FDX",
-        type=["pdf", "fdx"],
-        key="top_script_uploader"
+cine_topbar(
+    project_name=st.session_state.project_info.get(
+        "nombre",
+        "Sin proyecto"
     )
+)
+# =========================================================
+# IMPORT DIALOG
+# =========================================================
 
-    if uploaded_file is not None:
+if "show_import_dialog" not in st.session_state:
+    st.session_state.show_import_dialog = False
 
-        uploaded_file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+if st.session_state.show_import_dialog:
+    import_dialog()
 
-        if st.session_state.get("last_uploaded_file_id") != uploaded_file_id:
+# Procesar el archivo seleccionado
+if st.session_state.uploaded_script is not None:
+    imported_ok = import_script(st.session_state.uploaded_script)
 
-            file_extension = uploaded_file.name.split(".")[-1].lower()
+    if imported_ok:
+        st.session_state.uploaded_script = None
+        st.session_state.show_import_dialog = False
+        st.session_state.current_view = "modules"
 
-            if file_extension == "pdf":
-                script_text = extract_text_from_pdf(uploaded_file)
-                scenes_df, characters_df = detect_scenes_from_pdf_text(script_text)
-                source_type = "PDF"
+        st.success("Guion importado correctamente.")
+        st.rerun()
 
-            elif file_extension == "fdx":
-                script_text, fdx_scenes, fdx_characters = extract_fdx_data(uploaded_file)
-                scenes_df, characters_df = detect_scenes_from_fdx(fdx_scenes, fdx_characters)
-                source_type = "FDX"
-
-            else:
-                script_text = ""
-                scenes_df = pd.DataFrame()
-                characters_df = pd.DataFrame()
-                source_type = "Desconocido"
-
-            st.session_state.script_text = script_text
-            st.session_state.scenes_df = normalize_scenes_df_octavos(scenes_df)
-            st.session_state.characters_df = characters_df
-            st.session_state.source_type = source_type
-            st.session_state.nombre_archivo_guion = uploaded_file.name
-            st.session_state.tipo_archivo_guion = source_type
-            st.session_state.fecha_importacion_guion = datetime.now().isoformat()
-            st.session_state.last_uploaded_file_id = uploaded_file_id
-
-            if not scenes_df.empty:
-                st.success("Guion analizado correctamente.")
-            else:
-                st.warning("No se detectaron escenas.")
-
-    st.markdown("### 2. Abrir proyecto guardado")
-
-    project_json = st.file_uploader(
-        "Abrir proyecto guardado (.json)",
-        type=["json"],
-        key="top_project_uploader"
-    )
-
-    if project_json is not None:
-        load_project_from_json(project_json)
-        st.success("Proyecto cargado correctamente.")
-
-    st.markdown("### 3. Guardar avances")
-
-    if not st.session_state.scenes_df.empty:
-        st.download_button(
-            label="Guardar proyecto actual",
-            data=project_to_json(),
-            file_name="proyecto_cineplan.json",
-            mime="application/json"
-        )
-
-        st.caption(
-            "Guarda constantemente los cambios de tu proyecto para continuar trabajando después."
-        )
     else:
-        st.info("Carga un guion o abre un proyecto para poder guardar.")
+        st.session_state.uploaded_script = None
+        st.session_state.show_import_dialog = False
 
-
+        st.error("No se pudo importar el guion.")
 # ---------------------------------------------------------
 # SIDEBAR / NAVEGACIÓN
 # ---------------------------------------------------------
@@ -1362,8 +991,13 @@ with st.sidebar:
 
     st.markdown("---")
 
-    if st.button("🏠 Inicio", use_container_width=True):
-        pass
+    if st.button(
+        "Inicio",
+        icon=":material/home:",
+        use_container_width=True
+    ):
+        st.session_state.current_view = "dashboard"
+        st.rerun()
 
     st.markdown("### Proyecto")
 
@@ -1378,11 +1012,46 @@ with st.sidebar:
 
     st.markdown("### Flujo de trabajo")
 
-    st.markdown("① Importar")
-    st.markdown("② Breakdown")
-    st.markdown("③ Stripboard")
-    st.markdown("④ Rodaje")
-    st.markdown("⑤ Llamados")
+    if st.button(
+        "Importar y revisar",
+        icon=":material/fact_check:",
+        use_container_width=True
+    ):
+        st.session_state.current_view = "modules"
+        st.session_state.main_menu = "1. Importar y analizar guion"
+        st.rerun()
+
+    if st.button(
+        "Breakdown",
+        icon=":material/calendar_month:",
+        use_container_width=True
+    ):
+        st.session_state.current_view = "modules"
+        st.session_state.main_menu = "2. Breakdown"
+        st.rerun()
+
+    if st.button(
+        "Stripboard",
+        icon=":material/view_agenda:",
+        use_container_width=True
+    ):
+        st.session_state.current_view = "modules"
+        st.session_state.main_menu = "3. Stripboard"
+        st.rerun()
+
+    st.button(
+        "Rodaje",
+        icon=":material/event:",
+        use_container_width=True,
+        disabled=True
+    )
+
+    st.button(
+        "Llamados",
+        icon=":material/description:",
+        use_container_width=True,
+        disabled=True
+    )
 
     st.markdown("---")
 
@@ -1400,15 +1069,25 @@ with st.sidebar:
 # ---------------------------------------------------------
 # PÁGINA DE INICIO
 # ---------------------------------------------------------
+dashboard = get_dashboard_data()
 
-if st.session_state.scenes_df.empty:
-    cine_header(
-    title="CinePlan Scheduler",
-    subtitle="Planifica toda la preproducción de tu proyecto cinematográfico desde un único lugar.",
-    icon="🎬"
+if st.session_state.current_view == "dashboard":
+    cine_dashboard_header(
+    project_name=dashboard["project"]["name"],
+    project_type="Preproducción cinematográfica",
+    script_name=dashboard["script"]["name"] or "Sin guion importado",
+    script_type=dashboard["script"]["type"] or "-",
+    imported_date=dashboard["script"]["date"][:10] if dashboard["script"]["date"] else "-",
+    scenes_count=dashboard["stats"]["scenes"],
+    characters_count=dashboard["stats"]["characters"],
+    locations_count=dashboard["stats"]["locations"],
+    progress=dashboard["progress"]
+    
 )
     
-    render_project_progress(current_step=1)
+    render_project_progress(
+    workflow=dashboard["workflow"]
+)
 
     st.markdown(
         "Planifica toda la preproducción de tu proyecto cinematográfico desde un único lugar."
@@ -1416,775 +1095,113 @@ if st.session_state.scenes_df.empty:
 
     st.divider()
 
-    with st.container(border=True):
+    col_stats, col_activity, col_actions = st.columns([1, 1, 1])
 
-        st.markdown("### Acciones rápidas")
+    with col_stats:
+        with cine_panel(
+            title="Estadísticas del proyecto",
+            subtitle="Resumen general",
+            panel_class="cine-dashboard-panel"
+             
+        ):
+            st.markdown("""
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+                <span class="material-symbols-rounded" style="font-size:22px;color:#f8b400;">analytics</span>
+                <span style="font-size:18px;font-weight:700;">Estadísticas del proyecto</span>
+            </div>
+            """, unsafe_allow_html=True)
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+            s1, s2, s3 = st.columns(3)
 
-        with col1:
-            cine_action_card("Importar Guion", "Carga PDF o FDX.", "description", "Iniciar")
+            with s1:
+                st.metric("Escenas", dashboard["stats"]["scenes"])
 
-        with col2:
-            cine_action_card("Breakdown", "Desglose por departamentos.", "checklist", "Abrir")
+            with s2:
+                st.metric("Personajes", dashboard["stats"]["characters"])
 
-        with col3:
-            cine_action_card("Stripboard", "Organiza escenas visualmente.", "view_agenda", "Diseñar")
+            with s3:
+                st.metric("Locaciones", dashboard["stats"]["locations"])
 
-        with col4:
-            cine_action_card("Plan de Rodaje", "Ordena escenas por jornadas.", "calendar_month", "Planear")
+            st.markdown("#### Resumen del breakdown")
+            st.write(f'**Octavos:** {dashboard["stats"]["total_eighths"]}')
+            st.write(f'**Duración estimada:** {dashboard["stats"]["estimated_duration"]}')
+            st.write(f'**Avance:** {dashboard["progress"]}%')
 
-        with col5:
-            cine_action_card("Hojas de Llamado", "Prepara llamados de producción.", "assignment", "Generar")
 
-    st.divider()
+    with col_activity:
+        with cine_panel(
+            title="Actividad reciente",
+            subtitle="Últimos movimientos",
+            panel_class="cine-dashboard-panel"
+            
+        ):
+            st.markdown("""
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+                <span class="material-symbols-rounded" style="font-size:22px;color:#f8b400;">history</span>
+                <span style="font-size:18px;font-weight:700;">Actividad reciente</span>
+            </div>
+            """, unsafe_allow_html=True)
 
-    col_estado, col_guia = st.columns([1, 1])
+            if dashboard["recent_activity"]:
+                for item in dashboard["recent_activity"]:
+                    st.markdown(
+                        f"""
+                        <div style="padding:8px 0;border-bottom:1px solid rgba(148,163,184,.15);">
+                            <span class="material-symbols-rounded" style="font-size:18px;color:#f8b400;vertical-align:middle;">
+                                {item.get("icon", "history")}
+                            </span>
+                            <strong>{item.get("title", "-")}</strong><br>
+                            <span style="font-size:12px;color:#94a3b8;">{item.get("time", "-")}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+            else:
+                st.info("Todavía no hay actividad registrada.")
 
-    with col_estado:
-        st.markdown("### Estado del proyecto")
 
-        st.write(f"**Proyecto:** {st.session_state.project_info.get('nombre', 'Proyecto sin título')}")
-        st.write("**Guion:** Sin importar")
-        st.write("**Escenas:** 0")
-        st.write("**Personajes:** 0")
-        st.write("**Locaciones:** 0")
-        st.write("**Último guardado:** -")
+    with col_actions:
+        with cine_panel(
+            title="Acciones rápidas",
+            subtitle="Atajos del proyecto",
+            panel_class="cine-dashboard-panel"
+            
+        ):
+            st.markdown("""
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+                <span class="material-symbols-rounded" style="font-size:22px;color:#f8b400;">bolt</span>
+                <span style="font-size:18px;font-weight:700;">Acciones rápidas</span>
+            </div>
+            """, unsafe_allow_html=True)
 
-    with col_guia:
-        st.markdown("### Guía rápida")
+            a1, a2 = st.columns(2)
 
-        st.write("① Crea o abre un proyecto.")
-        st.write("② Importa un guion PDF o FDX.")
-        st.write("③ Revisa escenas, personajes y locaciones.")
-        st.write("④ Continúa al Breakdown.")
-        st.write("⑤ Diseña el Stripboard.")
-        st.write("⑥ Genera plan de rodaje y hojas de llamado.")
+            with a1:
+                cine_action_card("Importar Guion", "PDF / FDX", "upload", "Iniciar")
+                cine_action_card("Breakdown", "Agregar elementos", "calendar_month", "Abrir")
+                cine_action_card("Plan de Rodaje", "Calendario y días", "event", "Planear")
 
-    st.info(
-        "Para comenzar, despliega la sección 📁 Proyecto / Archivos. Desde ahí podrás cargar un guion, abrir proyectos guardados y guardar tu progreso."
-    )
+            with a2:
+                cine_action_card("Revisar", "Escenas y locaciones", "fact_check", "Abrir")
+                cine_action_card("Stripboard", "Orden de rodaje", "grid_view", "Diseñar")
+                cine_action_card("Hojas de Llamado", "Generar llamadas", "description", "Generar")
+
+            consejo_html = '<div style="margin-top:24px;padding:18px 22px;border:1px solid rgba(148,163,184,.15);border-radius:16px;background:rgba(15,23,42,.65);display:flex;align-items:center;gap:16px;"><span class="material-symbols-rounded" style="font-size:34px;color:#f8b400;">lightbulb</span><div><div style="font-size:17px;font-weight:700;color:white;margin-bottom:4px;">Consejo</div><div style="font-size:14px;color:#cbd5e1;line-height:1.6;">Comienza importando un guion en PDF o Final Draft (.FDX). CinePlan detectará automáticamente las escenas, personajes y locaciones para continuar con el Breakdown, Stripboard, Plan de Rodaje y Hojas de Llamado.</div></div></div>'
+
+    st.markdown(consejo_html, unsafe_allow_html=True)
 
 
 else:
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### Navegación")
+    st.session_state.current_view = "modules"
 
-    main_menu = st.sidebar.radio(
-    "Módulo",
-    [
-        "1. Importar y analizar guion",
-        "2. Breakdown",
-        "3. Stripboard"
-    ],
-    key="main_menu"
-)
+    if "main_menu" not in st.session_state:
+        st.session_state.main_menu = "1. Importar y analizar guion"
+
+    main_menu = st.session_state.main_menu
 
     if main_menu == "1. Importar y analizar guion":
-        st.subheader("Importar guion / Revisión inicial")
-
-        sub_menu = st.sidebar.radio(
-            "Revisión inicial",
-            [
-                "Proyecto",
-                "Escenas detectadas",
-                "Locaciones",
-                "Personajes",
-                "Octavos",
-                "Resumen general",
-            ],
-            
-            key="import_sub_menu"
-        )
+        render_review_page()
         
-        if sub_menu == "Proyecto":
-            st.markdown("### Datos del proyecto")
-
-            st.session_state.project_info["nombre"] = st.text_input(
-                "Nombre del proyecto",
-                st.session_state.project_info.get("nombre", "Proyecto sin título")
-            )
-
-            st.session_state.project_info["director"] = st.text_input(
-                "Director/a",
-                st.session_state.project_info.get("director", "")
-            )
-
-            st.session_state.project_info["productor"] = st.text_input(
-                "Productor/a",
-                st.session_state.project_info.get("productor", "")
-            )
-
-            st.session_state.project_info["version_guion"] = st.text_input(
-                "Versión del guion",
-                st.session_state.project_info.get("version_guion", "")
-            )
-
-            st.markdown("### Archivo")
-            st.write(f"Formato detectado: {st.session_state.source_type}")
-
-            with st.expander("Ver texto extraído del guion"):
-                st.text_area(
-                    "Texto del guion",
-                    st.session_state.script_text,
-                    height=400
-                )
-
-        elif sub_menu == "Escenas detectadas":
-            st.markdown("### Escenas detectadas y editables")
-
-            required_scene_columns = [
-                "Orden",
-                "Escena",
-                "Encabezado de escena",
-                "INT/EXT",
-                "Tiempo",
-                "Locación",
-                "Octavos",
-                "Página",
-                "Estado",
-                "Notas"
-            ]
-
-            for column in required_scene_columns:
-                if column not in st.session_state.scenes_df.columns:
-                    st.session_state.scenes_df[column] = ""
-
-            if st.button("Agregar escena"):
-                nuevo_numero = len(st.session_state.scenes_df) + 1
-
-                nueva_escena = pd.DataFrame([{
-                    "Orden": nuevo_numero,
-                    "Escena": nuevo_numero,
-                    "Encabezado de escena": "NUEVA ESCENA",
-                    "INT/EXT": "",
-                    "Tiempo": "",
-                    "Locación": "",
-                    "Octavos": "1/8",
-                    "Página": "",
-                    "Estado": "Pendiente de revisión",
-                    "Notas": ""
-                }])
-
-                st.session_state.scenes_df = pd.concat(
-                    [st.session_state.scenes_df, nueva_escena],
-                    ignore_index=True
-                )
-
-                st.rerun()
-
-            st.caption(
-                "También puedes agregar escenas directamente desde la última fila vacía de la tabla."
-            )
-
-            st.markdown("### Eliminar escena")
-
-            escenas_disponibles = []
-            for _, row in st.session_state.scenes_df.iterrows():
-                numero = str(row.get("Escena", ""))
-                encabezado = str(row.get("Encabezado de escena", ""))
-                texto = f"{numero} - {encabezado}"
-                escenas_disponibles.append(texto)
-
-            if escenas_disponibles:
-                escena_a_eliminar = st.selectbox(
-                    "Selecciona una escena para eliminar",
-                    escenas_disponibles,
-                    key="escena_a_eliminar"
-                )
-
-                if st.button("Eliminar escena seleccionada"):
-                    st.session_state.scenes_df = (
-                        st.session_state.scenes_df[
-                            st.session_state.scenes_df["Escena"].astype(str) != escena_a_eliminar.split(" - ")[0]
-                        ]
-                        .reset_index(drop=True)
-                    )
-
-                    st.rerun()
-            else:
-                st.info("No hay escenas para eliminar.")
-
-            with st.form("form_escenas"):
-                edited_scenes = st.data_editor(
-                    st.session_state.scenes_df[required_scene_columns],
-                    use_container_width=True,
-                    num_rows="dynamic"
-                )
-
-                col_guardar, col_ordenar = st.columns([1, 1])
-
-                with col_guardar:
-                    guardar_escenas = st.form_submit_button("Guardar cambios")
-
-                with col_ordenar:
-                    ordenar_escenas = st.form_submit_button("Ordenar escenas por ID")
-
-                if guardar_escenas:
-                    st.session_state.scenes_df = edited_scenes.fillna("").copy()
-                    st.success("Escenas actualizadas correctamente.")
-
-                if ordenar_escenas:
-                    edited_scenes = edited_scenes.fillna("").copy()
-
-                    edited_scenes["Orden"] = pd.to_numeric(
-                        edited_scenes["Orden"],
-                        errors="coerce"
-                    )
-
-                    edited_scenes = (
-                        edited_scenes
-                        .sort_values("Orden")
-                        .reset_index(drop=True)
-                    )
-
-                    st.session_state.scenes_df = edited_scenes.copy()
-
-                    st.success("Escenas ordenadas correctamente.")
-                    st.rerun()
-
-            col_left, col_excel, col_pdf = st.columns([6, 1, 1])
-
-            with col_excel:
-                st.download_button(
-                    label="Excel",
-                    data=dataframe_to_excel(st.session_state.scenes_df),
-                    file_name="escenas_detectadas.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-
-            with col_pdf:
-                st.download_button(
-                    label="PDF",
-                    data=dataframe_to_pdf(
-                        st.session_state.scenes_df,
-                        "Reporte de Escenas"
-                    ),
-                    file_name="escenas_detectadas.pdf",
-                    mime="application/pdf"
-                )
-
-            st.markdown("### Resumen de escenas detectadas")
-
-            st.metric(
-                label="Total de escenas detectadas",
-                value=len(st.session_state.scenes_df)
-            )
-
-        elif sub_menu == "Locaciones":
-            st.markdown("### Locaciones detectadas y editables")
-
-            # ---------------------------------------------------------
-            # CREAR RESUMEN DE LOCACIONES DESDE ESCENAS
-            # ---------------------------------------------------------
-
-            locations_df = st.session_state.scenes_df[[
-                "Locación",
-                "INT/EXT",
-                "Tiempo",
-                "Escena",
-                "Encabezado de escena"
-            ]].copy()
-
-            def classify_location_type(types):
-                types = str(types).upper()
-
-                if "I/E" in types:
-                    return "Interior / Exterior"
-                elif "INT" in types and "EXT" in types:
-                    return "Interior / Exterior"
-                elif "INT" in types:
-                    return "Interior"
-                elif "EXT" in types:
-                    return "Exterior"
-                else:
-                    return "Especial / Narrativa"
-
-            location_summary = (
-                locations_df
-                .groupby("Locación")
-                .agg({
-                    "Escena": lambda x: ", ".join(map(str, sorted(set(x)))),
-                    "INT/EXT": lambda x: ", ".join(sorted(set(x))),
-                    "Tiempo": lambda x: ", ".join(sorted(set(x))),
-                    "Encabezado de escena": lambda x: " | ".join(sorted(set(map(str, x))))
-                })
-                .reset_index()
-            )
-
-            location_summary["Clasificación"] = location_summary["INT/EXT"].apply(classify_location_type)
-
-            if "manual_locations_df" not in st.session_state:
-                st.session_state.manual_locations_df = pd.DataFrame(columns=[
-                    "Locación",
-                    "Escena",
-                    "INT/EXT",
-                    "Tiempo",
-                    "Encabezado de escena",
-                    "Clasificación"
-                ])
-
-            full_locations_df = pd.concat(
-                [location_summary, st.session_state.manual_locations_df],
-                ignore_index=True
-            )
-
-            # ---------------------------------------------------------
-            # AGREGAR LOCACIÓN
-            # ---------------------------------------------------------
-
-            if st.button("Agregar locación"):
-                nueva_locacion = pd.DataFrame([{
-                    "Locación": "NUEVA LOCACIÓN",
-                    "Escena": "",
-                    "INT/EXT": "",
-                    "Tiempo": "",
-                    "Encabezado de escena": "",
-                    "Clasificación": "Sin clasificar"
-                }])
-
-                st.session_state.manual_locations_df = pd.concat(
-                    [st.session_state.manual_locations_df, nueva_locacion],
-                    ignore_index=True
-                )
-
-                st.rerun()
-
-            st.caption(
-                "Las locaciones detectadas vienen de las escenas. Las locaciones agregadas manualmente se usan como apoyo de organización."
-            )
-
-            # ---------------------------------------------------------
-            # ELIMINAR LOCACIÓN
-            # ---------------------------------------------------------
-
-            st.markdown("### Eliminar locación")
-
-            locaciones_disponibles = full_locations_df["Locación"].dropna().astype(str).tolist()
-
-            if locaciones_disponibles:
-                locacion_a_eliminar = st.selectbox(
-                    "Selecciona una locación para eliminar",
-                    options=locaciones_disponibles,
-                    key="locacion_a_eliminar"
-                )
-
-                if st.button("Eliminar locación seleccionada"):
-                    st.session_state.manual_locations_df = (
-                        st.session_state.manual_locations_df[
-                            st.session_state.manual_locations_df["Locación"] != locacion_a_eliminar
-                        ]
-                        .reset_index(drop=True)
-                    )
-
-                    st.success(f"Locación eliminada: {locacion_a_eliminar}")
-                    st.rerun()
-            else:
-                st.info("No hay locaciones para eliminar.")
-
-            # ---------------------------------------------------------
-            # TABLA EDITABLE
-            # ---------------------------------------------------------
-
-            with st.form("form_locaciones"):
-                edited_locations = st.data_editor(
-                    full_locations_df,
-                    use_container_width=True,
-                    num_rows="dynamic"
-                )
-
-                guardar_locaciones = st.form_submit_button("Guardar cambios")
-
-                if guardar_locaciones:
-                    manual_rows = edited_locations[
-                        edited_locations["Escena"].astype(str).str.strip() == ""
-                    ].copy()
-
-                    st.session_state.manual_locations_df = manual_rows.reset_index(drop=True)
-
-                    st.success("Locaciones actualizadas correctamente.")
-
-            # ---------------------------------------------------------
-            # TABLAS DE CLASIFICACIÓN
-            # ---------------------------------------------------------
-
-            st.markdown("### Resumen por tipo de locación")
-
-            interiores_df = st.session_state.scenes_df[
-                st.session_state.scenes_df["INT/EXT"].astype(str).str.upper().str.contains("INT", na=False)
-                & ~st.session_state.scenes_df["INT/EXT"].astype(str).str.upper().str.contains("I/E", na=False)
-            ][[
-                "Escena",
-                "Encabezado de escena",
-                "Locación",
-                "Tiempo",
-                "Octavos"
-            ]].copy()
-
-            exteriores_df = st.session_state.scenes_df[
-                st.session_state.scenes_df["INT/EXT"].astype(str).str.upper().str.contains("EXT", na=False)
-                & ~st.session_state.scenes_df["INT/EXT"].astype(str).str.upper().str.contains("I/E", na=False)
-            ][[
-                "Escena",
-                "Encabezado de escena",
-                "Locación",
-                "Tiempo",
-                "Octavos"
-            ]].copy()
-
-            interiores_exteriores_df = st.session_state.scenes_df[
-                st.session_state.scenes_df["INT/EXT"].astype(str).str.upper().str.contains("I/E", na=False)
-            ][[
-                "Escena",
-                "Encabezado de escena",
-                "Locación",
-                "Tiempo",
-                "Octavos"
-            ]].copy()
-
-            keywords_especiales = [
-                "FLASH",
-                "FLASHBACK",
-                "SUEÑO",
-                "VISION",
-                "VISIÓN",
-                "RITUAL",
-                "PESADILLA",
-                "RECUERDO",
-                "MONTAJE",
-                "SECUENCIA"
-            ]
-
-            patron_especiales = "|".join(keywords_especiales)
-
-            especiales_df = st.session_state.scenes_df[
-                st.session_state.scenes_df["Encabezado de escena"]
-                .astype(str)
-                .str.upper()
-                .str.contains(patron_especiales, na=False)
-            ][[
-                "Escena",
-                "Encabezado de escena",
-                "Locación",
-                "Tiempo",
-                "Octavos"
-            ]].copy()
-
-            col1, col2, col3, col4 = st.columns(4)
-
-            col1.metric("Interiores", len(interiores_df))
-            col2.metric("Exteriores", len(exteriores_df))
-            col3.metric("I/E", len(interiores_exteriores_df))
-            col4.metric("Especiales", len(especiales_df))
-
-            with st.expander("Ver escenas interiores"):
-                st.dataframe(interiores_df, use_container_width=True)
-
-            with st.expander("Ver escenas exteriores"):
-                st.dataframe(exteriores_df, use_container_width=True)
-
-            with st.expander("Ver escenas I/E"):
-                st.dataframe(interiores_exteriores_df, use_container_width=True)
-
-            with st.expander("Ver escenas especiales / narrativas"):
-                st.dataframe(especiales_df, use_container_width=True)
-
-            # ---------------------------------------------------------
-            # EXPORTAR EXCEL / PDF
-            # ---------------------------------------------------------
-
-            export_locations_df = pd.concat([
-                interiores_df.assign(Clasificación="Interior"),
-                exteriores_df.assign(Clasificación="Exterior"),
-                interiores_exteriores_df.assign(Clasificación="Interior / Exterior"),
-                especiales_df.assign(Clasificación="Especial / Narrativa")
-            ], ignore_index=True)
-
-            col_left, col_excel, col_pdf = st.columns([6, 1, 1])
-
-            with col_excel:
-                st.download_button(
-                    label="Excel",
-                    data=dataframe_to_excel(export_locations_df),
-                    file_name="locaciones_y_clasificacion.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-
-            with col_pdf:
-                st.download_button(
-                    label="PDF",
-                    data=dataframe_to_pdf(
-                        export_locations_df,
-                        title="Reporte de Locaciones y Clasificación"
-                    ),
-                    file_name="locaciones_y_clasificacion.pdf",
-                    mime="application/pdf"
-                )
-
-            
-        elif sub_menu == "Personajes":
-            st.markdown("### Personajes detectados y editables")
-
-            required_character_columns = [
-                "ID",
-                "Personaje",
-                "Actor/Actriz",
-                "Contacto",
-                "Notas"
-            ]
-
-            for column in required_character_columns:
-                if column not in st.session_state.characters_df.columns:
-                    st.session_state.characters_df[column] = ""
-
-            if st.button("Agregar personaje"):
-                nuevo_id = len(st.session_state.characters_df) + 1
-
-                nueva_fila = pd.DataFrame([{
-                    "ID": nuevo_id,
-                    "Personaje": "NUEVO PERSONAJE",
-                    "Actor/Actriz": "",
-                    "Contacto": "",
-                    "Notas": ""
-                }])
-
-                st.session_state.characters_df = pd.concat(
-                    [st.session_state.characters_df, nueva_fila],
-                    ignore_index=True
-                )
-
-                st.rerun()
-
-            st.caption(
-                "También puedes agregar personajes directamente desde la última fila vacía de la tabla."
-            )
-
-            st.markdown("### Eliminar personaje")
-
-            personajes_disponibles = (
-                st.session_state.characters_df["Personaje"]
-                .dropna()
-                .astype(str)
-                .tolist()
-            )
-
-            if personajes_disponibles:
-                personaje_a_eliminar = st.selectbox(
-                    "Selecciona un personaje para eliminar",
-                    personajes_disponibles
-                )
-
-                if st.button("Eliminar personaje seleccionado"):
-                    st.session_state.characters_df = (
-                        st.session_state.characters_df[
-                            st.session_state.characters_df["Personaje"] != personaje_a_eliminar
-                        ]
-                        .reset_index(drop=True)
-                    )
-
-                    st.rerun()
-
-            else:
-                st.info("No hay personajes para eliminar.")
-
-            with st.form("form_personajes"):
-                edited_characters = st.data_editor(
-                    st.session_state.characters_df[required_character_columns],
-                    use_container_width=True,
-                    num_rows="dynamic"
-                )
-
-                col_guardar, col_ordenar = st.columns([1, 1])
-
-                with col_guardar:
-                    guardar_personajes = st.form_submit_button("Guardar cambios")
-
-                with col_ordenar:
-                    ordenar_personajes = st.form_submit_button("Ordenar personajes por ID")
-
-                if guardar_personajes:
-                    st.session_state.characters_df = edited_characters.fillna("").copy()
-                    st.success("Personajes actualizados correctamente.")
-
-                if ordenar_personajes:
-                    edited_characters = edited_characters.fillna("").copy()
-
-                    edited_characters["ID"] = pd.to_numeric(
-                        edited_characters["ID"],
-                        errors="coerce"
-                    )
-
-                    edited_characters = (
-                        edited_characters
-                        .sort_values("ID")
-                        .reset_index(drop=True)
-                    )
-
-                    edited_characters["ID"] = range(
-                        1,
-                        len(edited_characters) + 1
-                    )
-
-                    st.session_state.characters_df = edited_characters.copy()
-
-                    st.success("Personajes ordenados correctamente.")
-                    st.rerun()
-
-            col_left, col_excel, col_pdf = st.columns([6, 1, 1])
-
-            with col_excel:
-                st.download_button(
-                    label="Excel",
-                    data=dataframe_to_excel(st.session_state.characters_df),
-                    file_name="personajes.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-
-            with col_pdf:
-                st.download_button(
-                    label="PDF",
-                    data=dataframe_to_pdf(
-                        st.session_state.characters_df,
-                        "Reporte de Personajes"
-                    ),
-                    file_name="personajes.pdf",
-                    mime="application/pdf"
-                )
-        
-        elif sub_menu == "Octavos":
-            st.markdown("### Octavos")
-
-            octavos_columns = [
-                "Escena",
-                "Locación",
-                "INT/EXT",
-                "Tiempo",
-                "octavos_auto",
-                "octavos_manual",
-                "octavos_final"
-            ]
-
-            display_df = st.session_state.scenes_df.copy()
-            for c in ["octavos_auto", "octavos_manual", "octavos_final"]:
-                if c not in display_df.columns:
-                    display_df[c] = ""
-                display_df[c] = display_df[c].fillna("").astype(str).map(normalize_octavos_value)
-
-            st.dataframe(
-                display_df[octavos_columns],
-                use_container_width=True
-            )
-
-            st.markdown("### Editar octavos de escena")
-
-            # Build labelled options mapping to row positions
-            options = []
-            label_to_index = {}
-            for i, row in display_df.iterrows():
-                escena_val = str(row.get("Escena", "")).strip()
-                locacion_val = str(row.get("Locación", "")).strip()
-                int_ext_val = str(row.get("INT/EXT", "")).strip()
-                tiempo_val = str(row.get("Tiempo", "")).strip()
-
-                label = f"Escena {escena_val} — {locacion_val or '-'} — {int_ext_val or '-'} — {tiempo_val or '-'}"
-                options.append(label)
-                label_to_index[label] = i
-
-            if not options:
-                st.info("No hay escenas disponibles para editar.")
-            else:
-                if "octavos_manual_inputs" not in st.session_state:
-                    st.session_state["octavos_manual_inputs"] = {}
-
-                selected_label = st.selectbox(
-                    "Seleccionar escena",
-                    options,
-                    key="octavos_selected_label"
-                )
-
-                row_index = label_to_index.get(selected_label)
-                if row_index is None:
-                    st.error("No se encontró la escena seleccionada.")
-                else:
-                    # Access by integer position to avoid ambiguous comparisons
-                    scene_row = st.session_state.scenes_df.iloc[row_index]
-                    auto_value = normalize_octavos_value(scene_row.get("octavos_auto", ""))
-                    current_manual = normalize_octavos_value(scene_row.get("octavos_manual", ""))
-                    current_final = normalize_octavos_value(scene_row.get("octavos_final", ""))
-
-                    # Initialize per-scene input cache
-                    if selected_label not in st.session_state["octavos_manual_inputs"]:
-                        st.session_state["octavos_manual_inputs"][selected_label] = current_manual
-
-                    prev_label = st.session_state.get("octavos_selected_label_prev")
-                    if prev_label != selected_label:
-                        st.session_state["octavos_manual_input"] = st.session_state["octavos_manual_inputs"].get(selected_label, current_manual)
-                        st.session_state["octavos_selected_label_prev"] = selected_label
-
-                    manual_input = st.text_input(
-                        "Nuevo valor manual",
-                        value=st.session_state.get("octavos_manual_input", ""),
-                        key="octavos_manual_input"
-                    )
-
-                    manual_input_normalized = normalize_octavos_value(manual_input)
-                    st.session_state["octavos_manual_inputs"][selected_label] = manual_input_normalized
-
-                    st.markdown(f"**Escena seleccionada:** {selected_label}")
-                    st.markdown(f"**Octavos automáticos:** {auto_value or '-'}")
-                    st.markdown(f"**Octavos manuales actuales:** {current_manual or '-'}")
-                    st.markdown(f"**Octavos finales actuales:** {current_final or '-'}")
-
-                    if st.button("🔄 Actualizar octavos de escena"):
-                        final_value = manual_input_normalized if manual_input_normalized else auto_value
-
-                        row_dict = scene_row.to_dict()
-                        row_dict["octavos_auto"] = auto_value
-                        row_dict["octavos_manual"] = manual_input_normalized
-                        row_dict["octavos_final"] = final_value
-                        row_dict["Octavos"] = final_value
-
-                        values = normalize_scene_octavos_fields(row_dict)
-
-                        # Update by label's integer position
-                        idx_label = st.session_state.scenes_df.index[row_index]
-                        st.session_state.scenes_df.loc[idx_label, "octavos_auto"] = values["octavos_auto"]
-                        st.session_state.scenes_df.loc[idx_label, "octavos_manual"] = values["octavos_manual"]
-                        st.session_state.scenes_df.loc[idx_label, "octavos_final"] = values["octavos_final"]
-                        st.session_state.scenes_df.loc[idx_label, "Octavos"] = values["Octavos"]
-
-                        st.success("Octavos actualizados correctamente.")
-
-            total_octavos = sum(
-                octavos_to_number(
-                    obtener_octavos_finales(row.to_dict())
-                )
-                for _, row in st.session_state.scenes_df.iterrows()
-            )
-
-            st.info(f"Total del guion: {number_to_octavos(total_octavos)}")
-
-        elif sub_menu == "Resumen general":
-            st.markdown("### Resumen general")
-
-            total_octavos = sum(
-                octavos_to_number(
-                    obtener_octavos_finales(row.to_dict())
-                )
-                for _, row in st.session_state.scenes_df.iterrows()
-            )
-
-            col1, col2, col3, col4 = st.columns(4)
-
-            col1.metric("Escenas", len(st.session_state.scenes_df))
-            col2.metric("Personajes", len(st.session_state.characters_df))
-            col3.metric("Locaciones", st.session_state.scenes_df["Locación"].nunique())
-            col4.metric("Octavos totales", number_to_octavos(total_octavos))
-
-            st.dataframe(
-                st.session_state.scenes_df,
-                use_container_width=True
-            )
 
     elif main_menu == "2. Breakdown":
         st.markdown("# Breakdown")
