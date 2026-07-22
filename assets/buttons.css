@@ -1,0 +1,23 @@
+/* Command Bar: stable groups, single-line commands, safe narrow-screen overflow. */
+.st-key-cineplan_command_bar_shell {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.st-key-cineplan_command_bar {
+    min-width: 760px;
+}
+
+.st-key-cineplan_command_bar button,
+.st-key-cineplan_command_bar a,
+.st-key-cineplan_command_bar button p,
+.st-key-cineplan_command_bar a p {
+    white-space: nowrap !important;
+}
+
+@media (max-width: 900px) {
+    .st-key-cineplan_command_bar {
+        min-width: 700px;
+    }
+}
