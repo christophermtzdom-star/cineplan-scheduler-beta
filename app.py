@@ -47,9 +47,15 @@ except Exception as stripboard_import_error:
     render_stripboard_page = None
 
 from project.project_state import get_dashboard_data, register_recent_activity
-from project.project_manager import open_project, save_current_project
+from project.project_manager import (
+    open_project,
+    open_uploaded_project,
+    project_download_bytes,
+    save_current_project,
+)
 from project.workspace_dialog import render_workspace_restore_dialog
 from project.workspace_runtime import begin_module, begin_submodule, go_to_dashboard
+from project.runtime_environment import is_web_runtime
 from project.breakdown_utils import (
     obtener_octavos_finales,
     ensure_cast_structure
@@ -1123,6 +1129,7 @@ def load_project_from_json(json_file):
 # TOP BAR
 # =========================================================
 
+web_mode = is_web_runtime()
 cine_topbar(
     project_name=st.session_state.project_info.get(
         "nombre",
@@ -1130,6 +1137,9 @@ cine_topbar(
     ),
     on_save=lambda: save_current_project(project_to_json),
     on_open=lambda: open_project(load_project_from_json),
+    web_mode=web_mode,
+    download_data=project_download_bytes(project_to_json) if web_mode else None,
+    on_upload=lambda uploaded: open_uploaded_project(uploaded, load_project_from_json),
 )
 render_workspace_restore_dialog()
 # =========================================================

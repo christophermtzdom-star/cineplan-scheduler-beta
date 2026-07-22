@@ -62,7 +62,7 @@ def choose_open_path():
         "askopenfilename",
         title="Abrir Proyecto",
         filetypes=(
-            ("Proyecto CinePlan", "*.cps"),
+            ("Proyecto CinePlan", "*.cps *.cineplan"),
             ("Proyecto CinePlan anterior", "*.json"),
         ),
     )

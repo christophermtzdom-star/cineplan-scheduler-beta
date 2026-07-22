@@ -1,7 +1,7 @@
 """Public project-management operations used by CinePlan controls."""
 
 import json
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 import streamlit as st
@@ -46,16 +46,32 @@ def _store_metadata(metadata):
     st.session_state.project_last_saved = metadata["last_saved"]
 
 
-def _save_to(path, payload_builder):
+def _build_container(payload_builder):
+    """Build the canonical container independently of its storage transport."""
     metadata = build_metadata(_session_metadata())
     refresh()
     project_name = st.session_state.get("project_info", {}).get("nombre", "")
     workspace = build_current_workspace(metadata["last_saved"], project_name)
-    container = {
+    return {
         **metadata,
         "workspace_context": workspace,
         "project": build_current_project_payload(payload_builder),
     }
+
+
+def project_download_bytes(payload_builder):
+    """Return the same validated project container used by desktop saves."""
+    container = _build_container(payload_builder)
+    from project.project_validator import validate_project_container
+
+    validate_project_container(container)
+    return json.dumps(container, ensure_ascii=False, indent=4).encode("utf-8")
+
+
+def _save_to(path, payload_builder):
+    container = _build_container(payload_builder)
+    metadata = container
+    workspace = container["workspace_context"]
     write_project(path, container)
     replace_current_context(workspace)
     remember_current_path(path)
@@ -97,6 +113,36 @@ def save_current_project(payload_builder):
 
 def _restore_payload(payload, payload_loader):
     payload_loader(StringIO(json.dumps(payload, ensure_ascii=False)))
+
+
+def open_uploaded_project(uploaded_file, payload_loader):
+    """Open a browser upload through the canonical project loading path."""
+    try:
+        filename = str(getattr(uploaded_file, "name", "")).casefold()
+        raw = uploaded_file.getvalue()
+        if filename.endswith(".json"):
+            payload = json.load(StringIO(raw.decode("utf-8-sig")))
+            _restore_payload(payload, payload_loader)
+            clear_current_path()
+            stage_workspace_after_open({})
+        else:
+            container = json.load(BytesIO(raw))
+            from project.project_validator import validate_project_container
+
+            container = validate_project_container(container)
+            _restore_payload(container["project"], payload_loader)
+            clear_current_path()
+            _store_metadata(container)
+            workspace = container.get("workspace_context", container.get("workspace", {}))
+            stage_workspace_after_open(workspace)
+        st.session_state.project_dirty = False
+        st.toast("Proyecto abierto correctamente.", icon=":material/folder_open:")
+        return True
+    except ProjectValidationError as error:
+        st.error(str(error))
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        st.error("No se pudo abrir el proyecto seleccionado.")
+    return False
 
 
 def open_project(payload_loader):
