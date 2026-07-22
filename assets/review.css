@@ -277,3 +277,35 @@ div[data-testid="stTextArea"] textarea {
 .review-stats-wide + div {
     margin-top: -8px;
 }
+
+/* Proyecto: equal-height editorial grid. The right viewer establishes the row
+   height and the final left card grows to the same baseline. */
+.cp-project-upper-left-marker,
+.cp-project-upper-right-marker {
+    display: block;
+    height: 0;
+    margin: 0;
+    padding: 0;
+}
+
+div[data-testid="stHorizontalBlock"]:has(.cp-project-upper-left-marker):has(.cp-project-upper-right-marker) {
+    align-items: stretch;
+}
+
+div[data-testid="stColumn"]:has(.cp-project-upper-left-marker) > div[data-testid="stVerticalBlock"],
+div[data-testid="stColumn"]:has(.cp-project-upper-right-marker) > div[data-testid="stVerticalBlock"] {
+    height: 100%;
+}
+
+div[data-testid="stColumn"]:has(.cp-project-upper-left-marker)
+> div[data-testid="stVerticalBlock"]
+> div[data-testid="stVerticalBlockBorderWrapper"]:last-child {
+    flex: 1 1 auto;
+}
+
+div[data-testid="stColumn"]:has(.cp-project-upper-left-marker)
+> div[data-testid="stVerticalBlock"]
+> div[data-testid="stVerticalBlockBorderWrapper"]:last-child
+> div {
+    height: 100%;
+}

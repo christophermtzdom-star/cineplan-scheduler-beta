@@ -1,6 +1,11 @@
 import streamlit as st
 import plotly.graph_objects as go
 
+from components.header import render_section_header
+from components.icons import ANALYTICS, DESCRIPTION, INFO, PROJECT, SCENE, STATUS, UPLOAD_FILE
+from components.panel import cine_panel
+from modules.screenplay_viewer import ScreenplayViewerState, render_screenplay_viewer
+
 
 LINES_PER_PAGE = 55
 
@@ -267,37 +272,29 @@ def render_project_tab():
     )
 
     script_text = st.session_state.get("script_text", "")
-    script_pages = split_script_into_pages(script_text)
-    total_pages = len(script_pages)
-
-    if "review_script_page" not in st.session_state:
-        st.session_state.review_script_page = 1
-
-    st.session_state.review_script_page = max(
-        1,
-        min(st.session_state.review_script_page, total_pages)
-    )
+    total_pages = len(split_script_into_pages(script_text))
 
     scenes_count = len(st.session_state.get("scenes_df", []))
     characters_count = len(st.session_state.get("characters_df", []))
     stats = get_project_stats()
 
-    with st.container(border=True):
-        st.markdown("## Proyecto")
-        st.caption(
+    render_section_header(
+        icon=PROJECT,
+        title="Proyecto",
+        description=(
             "Confirma los datos principales del proyecto y verifica el guion importado."
         )
-
-    col_left, col_right = st.columns(
-        [1, 2.25],
-        gap="large"
     )
 
-    with col_left:
+    col_left, col_right = st.columns([1, 2.45], gap="large")
 
-        with st.container(border=True):
-            st.markdown("### Información del proyecto")
-            st.caption("Datos generales")
+    with col_left:
+        st.markdown('<span class="cp-project-upper-left-marker"></span>', unsafe_allow_html=True)
+
+        with cine_panel(
+            title=f":material/{INFO}: Información del proyecto",
+            subtitle="Datos generales"
+        ):
 
             st.session_state.project_info["nombre"] = st.text_input(
                 "Nombre del proyecto",
@@ -319,9 +316,10 @@ def render_project_tab():
                 st.session_state.project_info.get("version_guion", "")
             )
 
-        with st.container(border=True):
-            st.markdown("### Archivo importado")
-            st.caption("Guion base")
+        with cine_panel(
+            title=f":material/{UPLOAD_FILE}: Archivo importado",
+            subtitle="Guion base"
+        ):
 
             st.write(
                 f"**Archivo:** "
@@ -338,9 +336,10 @@ def render_project_tab():
                 f"{st.session_state.get('fecha_importacion_guion', '-')}"
             )
 
-        with st.container(border=True):
-            st.markdown("### Resumen del guion")
-            st.caption("Datos detectados")
+        with cine_panel(
+            title=f":material/{ANALYTICS}: Resumen del guion",
+            subtitle="Datos detectados"
+        ):
 
             c1, c2 = st.columns(2)
             c1.metric("Escenas", scenes_count)
@@ -351,48 +350,29 @@ def render_project_tab():
             c4.metric("Locaciones", stats["locations_count"])
 
     with col_right:
+        st.markdown('<span class="cp-project-upper-right-marker"></span>', unsafe_allow_html=True)
 
-        with st.container(border=True):
-            st.markdown("### Vista previa del guion")
-            st.caption("Texto extraído del archivo importado")
-
-            st.markdown(
-                f"**Página {st.session_state.review_script_page} de {total_pages}**"
+        with cine_panel(
+            title=f":material/{DESCRIPTION}: Vista previa del guion",
+            subtitle="Documento de trabajo"
+        ):
+            render_screenplay_viewer(
+                source_type=st.session_state.get("source_type", ""),
+                original_file_bytes=st.session_state.get("screenplay_source_bytes"),
+                script_text=script_text,
+                filename=st.session_state.get("nombre_archivo_guion", "guion.pdf"),
+                navigation=ScreenplayViewerState(page=1),
             )
 
-            st.number_input(
-                "Página",
-                min_value=1,
-                max_value=total_pages,
-                step=1,
-                key="review_script_page"
-            )
+    with cine_panel(
+        title=f":material/{ANALYTICS}: Estadísticas rápidas",
+        subtitle="Resumen visual actualizado del guion importado"
+    ):
 
-            current_page_text = script_pages[
-                st.session_state.review_script_page - 1
-            ]
-
-            st.text_area(
-                "Texto del guion",
-                current_page_text,
-                height=610,
-                disabled=True,
-                label_visibility="collapsed"
-            )
-
-    with st.container(border=True):
-        st.markdown("### Estadísticas rápidas")
-        st.caption("Resumen visual actualizado del guion importado")
-
-        chart_col1, chart_col2, chart_col3 = st.columns(
-            3,
-            gap="large"
-        )
+        chart_col1, chart_col2, chart_col3 = st.columns(3, gap="large")
 
         with chart_col1:
-            inner_chart, inner_list = st.columns(
-                [1.15, 1]
-            )
+            inner_chart, inner_list = st.columns([1.15, 1])
 
             with inner_chart:
                 st.plotly_chart(
@@ -405,7 +385,7 @@ def render_project_tab():
                 )
 
             with inner_list:
-                st.markdown("#### Tipo de escena")
+                st.markdown(f"#### :material/{SCENE}: Tipo de escena")
                 render_stat_list(
                     stats["type_labels"],
                     stats["type_values"],
@@ -413,9 +393,7 @@ def render_project_tab():
                 )
 
         with chart_col2:
-            inner_chart, inner_list = st.columns(
-                [1.15, 1]
-            )
+            inner_chart, inner_list = st.columns([1.15, 1])
 
             with inner_chart:
                 st.plotly_chart(
@@ -428,7 +406,7 @@ def render_project_tab():
                 )
 
             with inner_list:
-                st.markdown("#### Tiempo")
+                st.markdown(f"#### :material/{INFO}: Tiempo")
                 render_stat_list(
                     stats["time_labels"],
                     stats["time_values"],
@@ -436,9 +414,7 @@ def render_project_tab():
                 )
 
         with chart_col3:
-            inner_chart, inner_list = st.columns(
-                [1.15, 1]
-            )
+            inner_chart, inner_list = st.columns([1.15, 1])
 
             with inner_chart:
                 st.plotly_chart(
@@ -451,7 +427,7 @@ def render_project_tab():
                 )
 
             with inner_list:
-                st.markdown("#### Estado")
+                st.markdown(f"#### :material/{STATUS}: Estado")
                 render_stat_list(
                     stats["status_labels"],
                     stats["status_values"],

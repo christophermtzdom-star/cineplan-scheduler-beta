@@ -1,4 +1,5 @@
 import streamlit as st
+from project.workspace_runtime import begin_module, begin_submodule, current_submodule, notify_tab_change
 
 from modules.review.project_tab import render_project_tab
 from modules.review.scenes_tab import render_scenes_tab
@@ -9,6 +10,7 @@ from modules.review.summary_tab import render_summary_tab
 
 
 def render_review_page():
+    begin_module("Importar y revisar")
 
     st.markdown(
         """
@@ -30,14 +32,22 @@ def render_review_page():
         unsafe_allow_html=True
     )
 
-    tabs = st.tabs([
+    labels = [
         "Proyecto",
         "Escenas detectadas",
         "Locaciones",
         "Personajes",
         "Octavos",
         "Resumen general"
-    ])
+    ]
+    selected = current_submodule("Proyecto")
+    if selected not in labels:
+        selected = "Proyecto"
+    tabs = st.tabs(
+        labels, default=selected, key="review_workspace_tab",
+        on_change=notify_tab_change, args=("review_workspace_tab",),
+    )
+    begin_submodule(selected)
 
     with tabs[0]:
         render_project_tab()

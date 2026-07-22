@@ -3,4 +3,6 @@ pdfplumber
 pandas
 openpyxl
 reportlab
+pypdf
 plotly
+streamlit-pdf-viewer==0.0.29

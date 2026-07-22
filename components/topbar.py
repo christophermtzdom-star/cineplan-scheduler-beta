@@ -1,7 +1,7 @@
 import streamlit as st
 
 
-def cine_topbar(project_name="Sin proyecto"):
+def cine_topbar(project_name="Sin proyecto", on_save=None, on_open=None):
 
     with st.container():
 
@@ -24,18 +24,22 @@ def cine_topbar(project_name="Sin proyecto"):
                 st.session_state.show_import_dialog = True
 
         with col_save:
-            st.button(
+            save_pressed = st.button(
                 "Guardar",
                 icon=":material/save:",
                 use_container_width=True
             )
+            if save_pressed and on_save:
+                on_save()
 
         with col_open:
-            st.button(
+            open_pressed = st.button(
                 "Abrir",
                 icon=":material/folder_open:",
                 use_container_width=True
             )
+            if open_pressed and on_open:
+                on_open()
 
         with col_settings:
             st.button(

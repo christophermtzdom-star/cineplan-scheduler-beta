@@ -2,14 +2,16 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 import re
+import random
 import json
 import xml.etree.ElementTree as ET
-import base64
 
+from html import escape
 from io import BytesIO
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import landscape, letter
+from reportlab.lib.styles import ParagraphStyle
 from datetime import datetime
 from pathlib import Path
 from components.ui import (
@@ -22,8 +24,37 @@ from components.ui import (
 )
 from components.import_dialog import import_dialog
 from modules.review_page import render_review_page
+from modules.screenplay_viewer import render_screenplay_viewer
+from modules.breakdown_page import render_breakdown_page
+from modules.breakdown.scene_page import render_scene_page
+from modules.breakdown.props_resources import legacy_props_projection, migrate_legacy_props
+from modules.breakdown.document_framework import (
+    format_excel_worksheet,
+    pdf_column_widths,
+    scene_color_identity,
+)
+from modules.breakdown.document_layout import (
+    GRID,
+    THEME,
+    dataframe_pdf as shared_dataframe_pdf,
+    pdf_page_callback,
+    pdf_scene_accent_commands,
+    table_styles as shared_table_styles,
+)
+try:
+    from modules.stripboard_page import render_stripboard_page
+except Exception as stripboard_import_error:
+    render_stripboard_page = None
 
-from project.project_state import get_dashboard_data
+from project.project_state import get_dashboard_data, register_recent_activity
+from project.project_manager import open_project, save_current_project
+from project.workspace_dialog import render_workspace_restore_dialog
+from project.workspace_runtime import begin_module, begin_submodule, go_to_dashboard
+from project.breakdown_utils import (
+    obtener_octavos_finales,
+    ensure_cast_structure
+)
+
 from project.importer import (
     import_script,
     normalize_octavos_value,
@@ -43,6 +74,7 @@ def load_theme():
         "buttons.css",
         "tables.css",
         "panel.css",
+        "review.css",
         "stripboard.css"
 
     ]
@@ -99,6 +131,23 @@ if "project_info" not in st.session_state:
         "version_guion": ""
     }
 
+for project_session_key, default_value in {
+    "current_project_path": "",
+    "current_project_filename": "",
+    "project_has_been_saved": False,
+    "project_id": "",
+    "project_created_at": "",
+    "project_last_saved": "",
+    "project_dirty": False,
+    "workspace_restore_pending": False,
+    "workspace_pending_context": {},
+    "cineplan_workspace_context": {},
+    "cineplan_workspace_providers": {},
+    "cineplan_workspace_runtime_id": "",
+}.items():
+    if project_session_key not in st.session_state:
+        st.session_state[project_session_key] = default_value
+
 if "nombre_archivo_guion" not in st.session_state:
     st.session_state.nombre_archivo_guion = ""
 
@@ -111,6 +160,9 @@ if "fecha_importacion_guion" not in st.session_state:
 if "version_proyecto_json" not in st.session_state:
     st.session_state.version_proyecto_json = "1.1"
 
+if "recent_activity" not in st.session_state:
+    st.session_state.recent_activity = []
+
 if "current_view" not in st.session_state:
     st.session_state.current_view = "dashboard"
 
@@ -122,6 +174,66 @@ if "current_view" not in st.session_state:
 # ---------------------------------------------------------
 # UI / DASHBOARD
 # ---------------------------------------------------------
+
+_DASHBOARD_TIPS = (
+    ("importar", "Importa versiones de guion con nombres claros para identificar rápidamente cada revisión."),
+    ("importar", "Comprueba que el PDF tenga texto seleccionable antes de iniciar la detección de escenas."),
+    ("importar", "Conserva una copia del guion original antes de realizar ajustes durante la revisión."),
+    ("revision", "Revisa los encabezados de escena antes de corregir personajes y locaciones."),
+    ("revision", "Registrar correctamente los octavos mejora la planeación del rodaje."),
+    ("revision", "Marca una escena como revisada solamente después de confirmar su encabezado y contenido."),
+    ("revision", "Unifica los nombres de personajes para evitar duplicados en Cast y Breakdown."),
+    ("revision", "Verifica las locaciones detectadas antes de comenzar el desglose por departamentos."),
+    ("breakdown", "Completa primero los datos de escena antes de registrar utilería."),
+    ("breakdown", "El Breakdown es la base del Stripboard y del Plan de Rodaje."),
+    ("breakdown", "Registra solo los departamentos que realmente intervienen en cada escena."),
+    ("cast", "Mantén actualizada la información del reparto antes de generar Hojas de Llamado."),
+    ("cast", "Confirma el estado de casting para identificar rápidamente personajes pendientes."),
+    ("cast", "Asocia cada personaje con sus escenas para facilitar la coordinación del reparto."),
+    ("props", "Distingue entre utilería de mano y decoración para asignar responsabilidades correctamente."),
+    ("props", "Documenta la continuidad de los props que cambian, se consumen o se rompen."),
+    ("props", "Identifica con anticipación la utilería que requiere medidas especiales de seguridad."),
+    ("wardrobe", "Los Looks de vestuario pueden reutilizarse en múltiples escenas."),
+    ("wardrobe", "Agrupa vestuario, maquillaje y peinado dentro del mismo Look de continuidad."),
+    ("wardrobe", "Describe el estado del personaje cuando afecte vestuario, maquillaje o cabello."),
+    ("vfx", "Separa claramente los VFX de los efectos prácticos que deben resolverse durante el rodaje."),
+    ("vfx", "Registra la prioridad y seguridad de cada efecto antes de cerrar el Breakdown."),
+    ("sonido", "Anota Playback, Room Tone, ADR y Foley cuando sean necesarios para la escena."),
+    ("extras", "Define cantidad, acción y responsable para cada grupo de extras de ambiente."),
+    ("extras", "Registra al Handler y las necesidades de seguridad cuando participen animales."),
+    ("produccion", "Utiliza las Notas de Producción para dejar instrucciones específicas a cada departamento."),
+    ("produccion", "Convierte las observaciones generales en instrucciones claras y accionables."),
+    ("stripboard", "Revisa continuidad, locación y tiempo dramático antes de ordenar el Stripboard."),
+    ("stripboard", "Agrupar escenas por locación puede reducir movimientos de equipo y tiempos de montaje."),
+    ("plan", "Considera disponibilidad de reparto, locaciones y luz natural al construir el Plan de Rodaje."),
+    ("plan", "Evita jornadas sobrecargadas distribuyendo páginas, octavos y complejidad técnica."),
+    ("llamados", "Confirma horarios, contactos y necesidades departamentales antes de emitir Hojas de Llamado."),
+    ("exportar", "Revisa la vista previa de cada documento antes de imprimirlo o compartirlo."),
+    ("continuidad", "Usa nombres consistentes para que la continuidad pueda seguir elementos entre escenas."),
+    ("preproduccion", "Guarda versiones frecuentes del proyecto durante la preproducción."),
+    ("preproduccion", "Una información breve y precisa ayuda más al equipo que una observación extensa y ambigua."),
+)
+
+
+def _select_dashboard_tip(dashboard_data):
+    """Selecciona un consejo y permite priorizar el contexto del flujo actual."""
+    workflow = dashboard_data.get("workflow", {})
+    if (
+        not dashboard_data.get("script", {}).get("name")
+        and not dashboard_data.get("stats", {}).get("scenes")
+    ):
+        preferred = {"importar"}
+    elif workflow.get("revision") == "en_progreso":
+        preferred = {"revision"}
+    elif workflow.get("breakdown") == "en_progreso":
+        preferred = {
+            "breakdown", "cast", "props", "wardrobe", "vfx",
+            "sonido", "extras", "produccion", "continuidad",
+        }
+    else:
+        preferred = {category for category, _ in _DASHBOARD_TIPS}
+    candidates = [tip for category, tip in _DASHBOARD_TIPS if category in preferred]
+    return random.choice(candidates)
 
 def render_project_progress(workflow):
 
@@ -171,39 +283,20 @@ def dataframe_to_excel(df):
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Tabla")
+        format_excel_worksheet(writer.sheets["Tabla"])
 
     output.seek(0)
     return output
 
 
-def dataframe_to_pdf(df, title="Reporte CinePlan"):
-    output = BytesIO()
-
-    doc = SimpleDocTemplate(
-        output,
-        pagesize=landscape(letter),
-        rightMargin=20,
-        leftMargin=20,
-        topMargin=20,
-        bottomMargin=20
+def dataframe_to_pdf(df, title="Reporte CinePlan", project_info=None):
+    project_info = project_info or st.session_state.get("project_info", {})
+    columns = list(df.columns)
+    return shared_dataframe_pdf(
+        df, title, pdf_column_widths(columns, THEME.usable_width, df.to_dict(orient="records")),
+        project=project_info.get("nombre", "Proyecto"),
+        version=project_info.get("version_guion", project_info.get("versión_guion", "—")),
     )
-
-    data = [list(df.columns)] + df.astype(str).values.tolist()
-
-    table = Table(data, repeatRows=1)
-
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.black),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
-        ("FONTSIZE", (0, 0), (-1, -1), 6),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-    ]))
-
-    doc.build([table])
-    output.seek(0)
-
-    return output
 
 def generate_breakdown_pdf(numero_escena, escena_info, project_info, sections=None):
     """Genera PDF estilo hoja de breakdown con bloques dinámicos de ancho completo o mitad de página.
@@ -214,13 +307,13 @@ def generate_breakdown_pdf(numero_escena, escena_info, project_info, sections=No
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
 
-    left_margin = 16
-    right_margin = 16
-    top_margin = 16
-    bottom_margin = 16
+    left_margin = THEME.margin
+    right_margin = THEME.margin
+    top_margin = GRID.pdf_content_top
+    bottom_margin = GRID.pdf_content_bottom
     page_width = landscape(letter)[0] - left_margin - right_margin
     half_block_width = page_width / 2
-    half_table_inner_width = half_block_width - 8
+    half_table_inner_width = half_block_width - GRID.box_padding * 2
 
     output = BytesIO()
     doc = SimpleDocTemplate(
@@ -235,20 +328,14 @@ def generate_breakdown_pdf(numero_escena, escena_info, project_info, sections=No
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle('title', parent=styles['Heading1'], fontSize=14)
     meta_style = ParagraphStyle('meta', parent=styles['Normal'], fontSize=8)
-    block_title = ParagraphStyle('block_title', parent=styles['Heading3'], fontSize=10)
+    block_title = ParagraphStyle(
+        'block_title', parent=styles['Heading3'], fontName=THEME.font_bold,
+        fontSize=GRID.title_size, leading=GRID.title_leading,
+        spaceBefore=GRID.section_gap, spaceAfter=GRID.content_gap / 2,
+    )
     normal_small = ParagraphStyle('normal_small', parent=styles['Normal'], fontSize=8)
 
     story = []
-
-    # Top header (project + meta)
-    header_data = [
-        [Paragraph(f"<b>{project_info.get('nombre','Proyecto')}</b>", title_style), Paragraph(f"Fecha: {datetime.now().strftime('%d/%m/%Y')}", meta_style)],
-        [Paragraph(f"Productora: {project_info.get('productor','-')}", meta_style), Paragraph(f"Director: {project_info.get('director','-')}", meta_style)]
-    ]
-    hdr = RLTable(header_data, colWidths=[page_width * 0.7, page_width * 0.3])
-    hdr.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP')]))
-    story.append(hdr)
-    story.append(Spacer(1,0.1*inch))
 
     # Scene header block (full width)
     scene_header = [
@@ -256,10 +343,18 @@ def generate_breakdown_pdf(numero_escena, escena_info, project_info, sections=No
         [Paragraph(f"Locación: {escena_info.get('Locación','-')}  |  INT/EXT: {escena_info.get('INT/EXT','-')}  |  Tiempo: {escena_info.get('Tiempo','-')}  |  Octavos: {escena_info.get('Octavos','-')}", normal_small)],
         [Paragraph(f"Color stripboard: {escena_info.get('Color stripboard','-')}", normal_small)]
     ]
+    scene_accent = scene_color_identity(escena_info)
     sh = RLTable(scene_header, colWidths=[page_width])
-    sh.setStyle(TableStyle([('BOX',(0,0),(-1,-1),0.5,colors.black), ('BACKGROUND',(0,0),(0,0),colors.HexColor('#f7f7f7'))]))
+    sh.setStyle(TableStyle([
+        *pdf_scene_accent_commands(scene_accent.hex),
+        ('BACKGROUND',(0,0),(0,0),colors.HexColor('#f7f7f7')),
+        ('LEFTPADDING',(0,0),(-1,-1),GRID.box_padding),
+        ('RIGHTPADDING',(0,0),(-1,-1),GRID.box_padding),
+        ('TOPPADDING',(0,0),(-1,-1),GRID.box_padding),
+        ('BOTTOMPADDING',(0,0),(-1,-1),GRID.box_padding),
+    ]))
     story.append(sh)
-    story.append(Spacer(1,0.1*inch))
+    story.append(Spacer(1, GRID.section_gap))
 
     # Descripción y Notas (full width)
     descripcion = escena_info.get('Descripción') or escena_info.get('descripcion_escena') or escena_info.get('descripcion') or escena_info.get('Descripcion') or ''
@@ -268,12 +363,12 @@ def generate_breakdown_pdf(numero_escena, escena_info, project_info, sections=No
     if descripcion:
         story.append(Paragraph('<b>DESCRIPCIÓN</b>', block_title))
         story.append(Paragraph(descripcion, normal_small))
-        story.append(Spacer(1,0.05*inch))
+        story.append(Spacer(1, GRID.section_gap))
 
     if notas:
         story.append(Paragraph('<b>NOTAS</b>', block_title))
         story.append(Paragraph(notas, normal_small))
-        story.append(Spacer(1,0.05*inch))
+        story.append(Spacer(1, GRID.section_gap))
 
     def has_value(value):
         if value is None:
@@ -287,22 +382,24 @@ def generate_breakdown_pdf(numero_escena, escena_info, project_info, sections=No
             return None
 
         columns = list(df.columns)
-        col_widths = [max_width / len(columns)] * len(columns)
-        data = [[Paragraph(str(col), normal_small) for col in columns]]
+        col_widths = pdf_column_widths(columns, max_width, df.to_dict(orient="records"))
+        cell_style, header_cell_style = shared_table_styles()
+        data = [[Paragraph(escape(str(col)), header_cell_style) for col in columns]]
 
-        for row in df.astype(str).values.tolist():
-            data.append([Paragraph(str(cell), normal_small) for cell in row])
+        for row in df.fillna("").astype(str).values.tolist():
+            data.append([Paragraph(escape(str(cell)), cell_style) for cell in row])
 
         tbl = RLTable(data, colWidths=col_widths, repeatRows=1)
         tbl.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 0.25, colors.black),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor(THEME.black)),
+            ('GRID', (0, 0), (-1, -1), GRID.border_width, colors.HexColor(THEME.border)),
             ('FONTSIZE', (0, 0), (-1, 0), 7),
             ('FONTSIZE', (0, 1), (-1, -1), 6),
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 2),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 2),
-            ('TOPPADDING', (0, 0), (-1, -1), 2),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ('LEFTPADDING', (0, 0), (-1, -1), GRID.table_padding_x),
+            ('RIGHTPADDING', (0, 0), (-1, -1), GRID.table_padding_x),
+            ('TOPPADDING', (0, 0), (-1, -1), GRID.table_padding_y),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), GRID.table_padding_y),
         ]))
         return tbl
 
@@ -349,11 +446,11 @@ def generate_breakdown_pdf(numero_escena, escena_info, project_info, sections=No
             nested_width = page_width if show_full_width else half_block_width
             nested = RLTable(block_story, colWidths=[nested_width])
             nested.setStyle(TableStyle([
-                ('BOX',(0,0),(-1,-1),0.25,colors.black),
-                ('LEFTPADDING',(0,0),(-1,-1),4),
-                ('RIGHTPADDING',(0,0),(-1,-1),4),
-                ('TOPPADDING',(0,0),(-1,-1),4),
-                ('BOTTOMPADDING',(0,0),(-1,-1),4),
+                ('BOX',(0,0),(-1,-1),GRID.border_width,colors.HexColor(THEME.border)),
+                ('LEFTPADDING',(0,0),(-1,-1),GRID.box_padding),
+                ('RIGHTPADDING',(0,0),(-1,-1),GRID.box_padding),
+                ('TOPPADDING',(0,0),(-1,-1),GRID.box_padding),
+                ('BOTTOMPADDING',(0,0),(-1,-1),GRID.box_padding),
             ]))
             blocks.append((nested, nested_width, max_columns))
 
@@ -385,7 +482,11 @@ def generate_breakdown_pdf(numero_escena, escena_info, project_info, sections=No
         main_table.setStyle(TableStyle(main_style))
         story.append(main_table)
 
-    doc.build(story)
+    callback = pdf_page_callback(
+        "HOJA DE BREAKDOWN", project_info.get("nombre", "Proyecto"),
+        project_info.get("version_guion", project_info.get("versión_guion", "—")),
+    )
+    doc.build(story, onFirstPage=callback, onLaterPages=callback)
     output.seek(0)
     return output
 
@@ -760,17 +861,36 @@ def project_to_json():
         "breakdown_scene_data",
         "breakdown_cast_data",
         "breakdown_props_data",
+        "breakdown_resource_store",
         "manual_locations_df",
         "breakdown_wardrobe_makeup_data",
         "breakdown_vfx_sound_data",
         "breakdown_extras_data",
         "breakdown_production_notes_data",
         "validation_checklist",
+        "recent_activity",
         "nombre_archivo_guion",
         "tipo_archivo_guion",
         "fecha_importacion_guion",
         "version_proyecto_json",
-        "last_uploaded_file_id"
+        "last_uploaded_file_id",
+        "_dashboard_project_signature",
+        "_dashboard_workflow_snapshot",
+        "screenplay_source_bytes",
+        "current_project_path",
+        "current_project_filename",
+        "project_has_been_saved",
+        "project_id",
+        "project_created_at",
+        "project_last_saved",
+        "project_dirty",
+        "workspace_restore_pending",
+        "workspace_pending_context",
+        "cineplan_workspace_context",
+        "cineplan_workspace_providers",
+        "cineplan_workspace_runtime_id",
+        "review_workspace_tab",
+        "breakdown_workspace_tab",
     }
 
     extra_state = {
@@ -805,6 +925,9 @@ def project_to_json():
             }
             for escena, datos in st.session_state.get("breakdown_props_data", {}).items()
         },
+        "breakdown_resource_store": serialize_nested_value(
+            st.session_state.get("breakdown_resource_store", {})
+        ),
         "breakdown_wardrobe_makeup_data": serialize_nested_value(
             st.session_state.get("breakdown_wardrobe_makeup_data", {})
         ),
@@ -819,6 +942,9 @@ def project_to_json():
         ),
         "validation_checklist": serialize_nested_value(
             st.session_state.get("validation_checklist", get_default_validation_checklist())
+        ),
+        "recent_activity": serialize_nested_value(
+            st.session_state.get("recent_activity", [])[:10]
         ),
         "extra_state": extra_state
     }
@@ -847,11 +973,18 @@ def load_project_from_json(json_file):
     )
 
     st.session_state.script_text = data.get("script_text", "")
+    # Saved projects keep their historical JSON schema; never reuse a PDF from
+    # a previously open project when the source document is not embedded.
+    st.session_state.pop("screenplay_source_bytes", None)
     st.session_state.source_type = data.get("source_type", "Proyecto JSON")
     st.session_state.nombre_archivo_guion = data.get("nombre_archivo_guion", "")
     st.session_state.tipo_archivo_guion = data.get("tipo_archivo_guion", "")
     st.session_state.fecha_importacion_guion = data.get("fecha_importacion_guion", "")
     st.session_state.version_proyecto_json = data.get("version_proyecto_json", "1.1")
+    loaded_activity = data.get("recent_activity", [])
+    st.session_state.recent_activity = (
+        loaded_activity[:10] if isinstance(loaded_activity, list) else []
+    )
 
     st.session_state.scenes_df = normalize_scenes_df_octavos(
         pd.DataFrame(data.get("scenes", []))
@@ -892,6 +1025,20 @@ def load_project_from_json(json_file):
         for escena, datos in breakdown_props_loaded.items()
     }
 
+    loaded_resource_store = data.get("breakdown_resource_store")
+    scene_locations = {
+        str(row.get("Escena", "")): row.get("Locación", row.get("LocaciÃ³n", ""))
+        for row in data.get("scenes", []) if isinstance(row, dict)
+    }
+    st.session_state.breakdown_resource_store = migrate_legacy_props(
+        breakdown_props_loaded,
+        store=loaded_resource_store if isinstance(loaded_resource_store, dict) else None,
+        scene_locations=scene_locations,
+    )
+    st.session_state.breakdown_props_data = legacy_props_projection(
+        st.session_state.breakdown_resource_store
+    )
+
     st.session_state.breakdown_wardrobe_makeup_data = deserialize_dataframe_structure(
         data.get("breakdown_wardrobe_makeup_data", {})
     )
@@ -923,17 +1070,35 @@ def load_project_from_json(json_file):
             "breakdown_scene_data",
             "breakdown_cast_data",
             "breakdown_props_data",
+            "breakdown_resource_store",
             "manual_locations_df",
             "breakdown_wardrobe_makeup_data",
             "breakdown_vfx_sound_data",
             "breakdown_extras_data",
             "breakdown_production_notes_data",
             "validation_checklist",
+            "recent_activity",
             "nombre_archivo_guion",
             "tipo_archivo_guion",
             "fecha_importacion_guion",
             "version_proyecto_json",
-            "last_uploaded_file_id"
+            "last_uploaded_file_id",
+            "_dashboard_project_signature",
+            "_dashboard_workflow_snapshot",
+            "current_project_path",
+            "current_project_filename",
+            "project_has_been_saved",
+            "project_id",
+            "project_created_at",
+            "project_last_saved",
+            "project_dirty",
+            "workspace_restore_pending",
+            "workspace_pending_context",
+            "cineplan_workspace_context",
+            "cineplan_workspace_providers",
+            "cineplan_workspace_runtime_id",
+            "review_workspace_tab",
+            "breakdown_workspace_tab",
         }:
             st.session_state[key] = value
 
@@ -943,6 +1108,17 @@ def load_project_from_json(json_file):
         st.session_state.validation_checklist = pd.DataFrame(
             st.session_state.validation_checklist
         ).fillna("").copy()
+
+    st.session_state._dashboard_project_signature = tuple(
+        str(st.session_state.project_info.get(key, "")).strip()
+        for key in ("nombre", "director", "productor", "version_guion")
+    )
+    st.session_state.pop("_dashboard_workflow_snapshot", None)
+    register_recent_activity(
+        "Proyecto cargado",
+        st.session_state.project_info.get("nombre", "Proyecto sin título"),
+        "upload_file", "proyecto",
+    )
 # =========================================================
 # TOP BAR
 # =========================================================
@@ -951,8 +1127,11 @@ cine_topbar(
     project_name=st.session_state.project_info.get(
         "nombre",
         "Sin proyecto"
-    )
+    ),
+    on_save=lambda: save_current_project(project_to_json),
+    on_open=lambda: open_project(load_project_from_json),
 )
+render_workspace_restore_dialog()
 # =========================================================
 # IMPORT DIALOG
 # =========================================================
@@ -965,9 +1144,17 @@ if st.session_state.show_import_dialog:
 
 # Procesar el archivo seleccionado
 if st.session_state.uploaded_script is not None:
+    # Keep the original upload in session memory for the reusable screenplay viewer.
+    # It is deliberately excluded from project JSON to preserve the existing schema.
+    st.session_state.screenplay_source_bytes = st.session_state.uploaded_script.getvalue()
     imported_ok = import_script(st.session_state.uploaded_script)
 
     if imported_ok:
+        register_recent_activity(
+            "Guion importado",
+            st.session_state.get("nombre_archivo_guion", "Guion del proyecto"),
+            "description", "guion",
+        )
         st.session_state.uploaded_script = None
         st.session_state.show_import_dialog = False
         st.session_state.current_view = "modules"
@@ -980,6 +1167,9 @@ if st.session_state.uploaded_script is not None:
         st.session_state.show_import_dialog = False
 
         st.error("No se pudo importar el guion.")
+# El Dashboard es la fuente única para el avance principal y lateral.
+dashboard = get_dashboard_data()
+
 # ---------------------------------------------------------
 # SIDEBAR / NAVEGACIÓN
 # ---------------------------------------------------------
@@ -996,7 +1186,7 @@ with st.sidebar:
         icon=":material/home:",
         use_container_width=True
     ):
-        st.session_state.current_view = "dashboard"
+        go_to_dashboard()
         st.rerun()
 
     st.markdown("### Proyecto")
@@ -1017,6 +1207,8 @@ with st.sidebar:
         icon=":material/fact_check:",
         use_container_width=True
     ):
+        begin_module("Importar y revisar")
+        begin_submodule("Proyecto")
         st.session_state.current_view = "modules"
         st.session_state.main_menu = "1. Importar y analizar guion"
         st.rerun()
@@ -1026,6 +1218,8 @@ with st.sidebar:
         icon=":material/calendar_month:",
         use_container_width=True
     ):
+        begin_module("Breakdown")
+        begin_submodule("Datos de escena")
         st.session_state.current_view = "modules"
         st.session_state.main_menu = "2. Breakdown"
         st.rerun()
@@ -1035,6 +1229,8 @@ with st.sidebar:
         icon=":material/view_agenda:",
         use_container_width=True
     ):
+        begin_module("Stripboard")
+        begin_submodule("Diseñar Stripboard")
         st.session_state.current_view = "modules"
         st.session_state.main_menu = "3. Stripboard"
         st.rerun()
@@ -1057,23 +1253,20 @@ with st.sidebar:
 
     st.caption("Progreso")
 
-    progreso = 0.0
+    st.progress(dashboard["progress"] / 100)
 
-    if not st.session_state.scenes_df.empty:
-        progreso = 0.20
-
-    st.progress(progreso)
-
-    st.caption("Paso 1 de 5")
+    st.caption(dashboard["progress_caption"])
 
 # ---------------------------------------------------------
 # PÁGINA DE INICIO
 # ---------------------------------------------------------
-dashboard = get_dashboard_data()
-
 if st.session_state.current_view == "dashboard":
+    if not st.session_state.get("workspace_restore_pending", False):
+        begin_module("Proyecto")
+        begin_submodule("Dashboard")
     cine_dashboard_header(
     project_name=dashboard["project"]["name"],
+    director_name=dashboard["project"]["director"],
     project_type="Preproducción cinematográfica",
     script_name=dashboard["script"]["name"] or "Sin guion importado",
     script_type=dashboard["script"]["type"] or "-",
@@ -1081,7 +1274,8 @@ if st.session_state.current_view == "dashboard":
     scenes_count=dashboard["stats"]["scenes"],
     characters_count=dashboard["stats"]["characters"],
     locations_count=dashboard["stats"]["locations"],
-    progress=dashboard["progress"]
+    progress=dashboard["progress"],
+    next_step=dashboard["next_step"]
     
 )
     
@@ -1111,21 +1305,22 @@ if st.session_state.current_view == "dashboard":
             </div>
             """, unsafe_allow_html=True)
 
-            s1, s2, s3 = st.columns(3)
+            with st.container(height=330, border=False):
+                s1, s2, s3 = st.columns(3)
 
-            with s1:
-                st.metric("Escenas", dashboard["stats"]["scenes"])
+                with s1:
+                    st.metric("Escenas", dashboard["stats"]["scenes"])
 
-            with s2:
-                st.metric("Personajes", dashboard["stats"]["characters"])
+                with s2:
+                    st.metric("Personajes", dashboard["stats"]["characters"])
 
-            with s3:
-                st.metric("Locaciones", dashboard["stats"]["locations"])
+                with s3:
+                    st.metric("Locaciones", dashboard["stats"]["locations"])
 
-            st.markdown("#### Resumen del breakdown")
-            st.write(f'**Octavos:** {dashboard["stats"]["total_eighths"]}')
-            st.write(f'**Duración estimada:** {dashboard["stats"]["estimated_duration"]}')
-            st.write(f'**Avance:** {dashboard["progress"]}%')
+                st.markdown("#### Resumen del breakdown")
+                st.write(f'**Octavos:** {dashboard["stats"]["total_eighths"]}')
+                st.write(f'**Duración estimada:** {dashboard["stats"]["estimated_duration"]}')
+                st.write(f'**Avance:** {dashboard["progress"]}%')
 
 
     with col_activity:
@@ -1142,22 +1337,44 @@ if st.session_state.current_view == "dashboard":
             </div>
             """, unsafe_allow_html=True)
 
-            if dashboard["recent_activity"]:
-                for item in dashboard["recent_activity"]:
-                    st.markdown(
-                        f"""
-                        <div style="padding:8px 0;border-bottom:1px solid rgba(148,163,184,.15);">
-                            <span class="material-symbols-rounded" style="font-size:18px;color:#f8b400;vertical-align:middle;">
-                                {item.get("icon", "history")}
-                            </span>
-                            <strong>{item.get("title", "-")}</strong><br>
-                            <span style="font-size:12px;color:#94a3b8;">{item.get("time", "-")}</span>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-            else:
-                st.info("Todavía no hay actividad registrada.")
+            activity_cards = []
+
+            for item in dashboard["recent_activity"]:
+                icon = item.get("icon", "history")
+                title = item.get("title", "-")
+                description = item.get("detail", item.get("description", ""))
+                timestamp = item.get("time", "-")
+
+                card_html = (
+                    '<div class="activity-card" style="padding:8px 2px;'
+                    'border-bottom:1px solid rgba(148,163,184,.15);'
+                    'min-width:0;overflow-wrap:anywhere;">'
+                    '<span class="material-symbols-rounded" style="font-size:18px;'
+                    f'color:#f8b400;vertical-align:middle;">{icon}</span>'
+                    f'<strong>{title}</strong><br>'
+                    f'<span style="font-size:12px;color:#cbd5e1;">{description}</span><br>'
+                    f'<span style="font-size:12px;color:#94a3b8;">{timestamp}</span>'
+                    '</div>'
+                )
+                activity_cards.append(card_html)
+
+            if not activity_cards:
+                activity_cards.append(
+                    '<div class="activity-card" style="padding:14px;border-radius:10px;'
+                    'background:rgba(59,130,246,.10);color:#cbd5e1;">'
+                    'Todavía no hay actividad registrada.'
+                    '</div>'
+                )
+
+            final_html = (
+                '<div style="height:330px;overflow-y:auto;overflow-x:hidden;'
+                'scroll-behavior:smooth;overscroll-behavior:contain;'
+                'border:1px solid rgba(148,163,184,.12);border-radius:12px;'
+                'padding:0 10px;box-sizing:border-box;">'
+                + "".join(activity_cards)
+                + '</div>'
+            )
+            st.markdown(final_html, unsafe_allow_html=True)
 
 
     with col_actions:
@@ -1174,19 +1391,28 @@ if st.session_state.current_view == "dashboard":
             </div>
             """, unsafe_allow_html=True)
 
-            a1, a2 = st.columns(2)
+            with st.container(height=330, border=False):
+                a1, a2 = st.columns(2)
 
-            with a1:
-                cine_action_card("Importar Guion", "PDF / FDX", "upload", "Iniciar")
-                cine_action_card("Breakdown", "Agregar elementos", "calendar_month", "Abrir")
-                cine_action_card("Plan de Rodaje", "Calendario y días", "event", "Planear")
+                with a1:
+                    cine_action_card("Importar Guion", "PDF / FDX", "upload", "Iniciar")
+                    cine_action_card("Breakdown", "Agregar elementos", "calendar_month", "Abrir")
+                    cine_action_card("Plan de Rodaje", "Calendario y días", "event", "Planear")
 
-            with a2:
-                cine_action_card("Revisar", "Escenas y locaciones", "fact_check", "Abrir")
-                cine_action_card("Stripboard", "Orden de rodaje", "grid_view", "Diseñar")
-                cine_action_card("Hojas de Llamado", "Generar llamadas", "description", "Generar")
+                with a2:
+                    cine_action_card("Revisar", "Escenas y locaciones", "fact_check", "Abrir")
+                    cine_action_card("Stripboard", "Orden de rodaje", "grid_view", "Diseñar")
+                    cine_action_card("Hojas de Llamado", "Generar llamadas", "description", "Generar")
 
-            consejo_html = '<div style="margin-top:24px;padding:18px 22px;border:1px solid rgba(148,163,184,.15);border-radius:16px;background:rgba(15,23,42,.65);display:flex;align-items:center;gap:16px;"><span class="material-symbols-rounded" style="font-size:34px;color:#f8b400;">lightbulb</span><div><div style="font-size:17px;font-weight:700;color:white;margin-bottom:4px;">Consejo</div><div style="font-size:14px;color:#cbd5e1;line-height:1.6;">Comienza importando un guion en PDF o Final Draft (.FDX). CinePlan detectará automáticamente las escenas, personajes y locaciones para continuar con el Breakdown, Stripboard, Plan de Rodaje y Hojas de Llamado.</div></div></div>'
+            dashboard_tip = _select_dashboard_tip(dashboard)
+            consejo_html = (
+                '<div style="margin-top:24px;padding:18px 22px;border:1px solid rgba(148,163,184,.15);'
+                'border-radius:16px;background:rgba(15,23,42,.65);display:flex;align-items:center;gap:16px;">'
+                '<span class="material-symbols-rounded" style="font-size:34px;color:#f8b400;">lightbulb</span>'
+                '<div><div style="font-size:17px;font-weight:700;color:white;margin-bottom:4px;">Consejo</div>'
+                f'<div style="font-size:14px;color:#cbd5e1;line-height:1.6;">{escape(dashboard_tip)}</div>'
+                '</div></div>'
+            )
 
     st.markdown(consejo_html, unsafe_allow_html=True)
 
@@ -1199,10 +1425,16 @@ else:
 
     main_menu = st.session_state.main_menu
 
-    if main_menu == "1. Importar y analizar guion":
+    if main_menu == "2. Breakdown":
+        render_breakdown_page()
+
+    elif main_menu == "1. Importar y analizar guion":
         render_review_page()
         
 
+    # LEGACY BREAKDOWN: retained temporarily for testing and later removal.
+    # This branch is unreachable because Breakdown is handled above by
+    # render_breakdown_page().
     elif main_menu == "2. Breakdown":
         st.markdown("# Breakdown")
 
@@ -1223,414 +1455,7 @@ else:
     key="breakdown_sub_menu"
 )
         if bd_menu == "Datos de escena":
-
-            st.markdown("## Datos de escena")
-
-            # -----------------------------------
-            # Crear selector de escena
-            # -----------------------------------
-
-            escenas_breakdown = []
-
-            for _, row in st.session_state.scenes_df.iterrows():
-
-                numero = str(row.get("Escena", ""))
-                encabezado = str(row.get("Encabezado de escena", ""))
-
-                escenas_breakdown.append(
-                    f"{numero} | {encabezado}"
-                )
-
-            if escenas_breakdown:
-
-                escena_seleccionada = st.selectbox(
-                    "Seleccionar escena",
-                    escenas_breakdown,
-                    key="breakdown_scene_selector"
-                )
-
-                numero_escena = escena_seleccionada.split(" | ")[0]
-
-                escena_df = st.session_state.scenes_df[
-                    st.session_state.scenes_df["Escena"].astype(str) == numero_escena
-                ]
-
-                if not escena_df.empty:
-
-                    escena_data = escena_df.iloc[0]
-
-                    # -----------------------------------
-                    # Crear almacenamiento breakdown
-                    # -----------------------------------
-
-                    if "breakdown_scene_data" not in st.session_state:
-                        st.session_state.breakdown_scene_data = {}
-
-                    datos_guardados = st.session_state.breakdown_scene_data.get(
-                        str(numero_escena),
-                        {}
-                    )
-
-                    # -----------------------------------
-                    # Función sugerir color
-                    # -----------------------------------
-
-                    def sugerir_color_stripboard(encabezado, int_ext, tiempo):
-
-                        encabezado = str(encabezado).upper()
-                        int_ext = str(int_ext).upper()
-                        tiempo = str(tiempo).upper()
-
-                        especiales = [
-                            "SUEÑO",
-                            "FLASH",
-                            "FLASHBACK",
-                            "RITUAL",
-                            "VISIÓN",
-                            "VISION",
-                            "MONTAJE",
-                            "SECUENCIA",
-                            "PESADILLA",
-                            "RECUERDO",
-                            "SOBRENATURAL"
-                        ]
-
-                        if any(palabra in encabezado for palabra in especiales):
-                            return "Morado"
-
-                        if "I/E" in int_ext:
-                            return "Rosa"
-
-                        if "INT" in int_ext and ("DÍA" in tiempo or "DIA" in tiempo):
-                            return "Blanco"
-
-                        if "EXT" in int_ext and ("DÍA" in tiempo or "DIA" in tiempo):
-                            return "Amarillo"
-
-                        if "INT" in int_ext and "NOCHE" in tiempo:
-                            return "Azul"
-
-                        if "EXT" in int_ext and "NOCHE" in tiempo:
-                            return "Verde"
-
-                        return "Blanco"
-
-                    color_sugerido = sugerir_color_stripboard(
-                        escena_data.get("Encabezado de escena", ""),
-                        escena_data.get("INT/EXT", ""),
-                        escena_data.get("Tiempo", "")
-                    )
-
-                    st.markdown("### Revisar y completar datos de escena")
-
-                    with st.form(f"form_datos_escena_{numero_escena}"):
-
-                        col1, col2, col3 = st.columns(3)
-
-                        # -----------------------------------
-                        # Columna 1
-                        # -----------------------------------
-
-                        with col1:
-
-                            escena_numero = st.text_input(
-                                "Número de escena",
-                                value=str(escena_data.get("Escena", "")),
-                                key=f"escena_numero_{numero_escena}"
-                            )
-
-                            opciones_int_ext = [
-                                "INT.",
-                                "EXT.",
-                                "I/E.",
-                                "ESPECIAL"
-                            ]
-
-                            valor_actual_int_ext = str(
-                                escena_data.get("INT/EXT", "INT.")
-                            )
-
-                            if valor_actual_int_ext not in opciones_int_ext:
-                                valor_actual_int_ext = "INT."
-
-                            int_ext = st.selectbox(
-                                "INT / EXT",
-                                opciones_int_ext,
-                                index=opciones_int_ext.index(valor_actual_int_ext),
-                                key=f"int_ext_{numero_escena}"
-                            )
-
-                            pagina = st.text_input(
-                                "Página",
-                                value=str(escena_data.get("Página", "")),
-                                key=f"pagina_{numero_escena}"
-                            )
-
-                        # -----------------------------------
-                        # Columna 2
-                        # -----------------------------------
-
-                        with col2:
-
-                            encabezado = st.text_input(
-                                "Encabezado de escena",
-                                value=str(
-                                    escena_data.get(
-                                        "Encabezado de escena",
-                                        ""
-                                    )
-                                ),
-                                key=f"encabezado_{numero_escena}"
-                            )
-
-                            tiempo = st.text_input(
-                                "Día / Noche / Tiempo",
-                                value=str(
-                                    escena_data.get("Tiempo", "")
-                                ),
-                                key=f"tiempo_{numero_escena}"
-                            )
-
-                            octavos = st.text_input(
-                                "Octavos",
-                                value=str(
-                                    escena_data.get("Octavos", "")
-                                ),
-                                key=f"octavos_{numero_escena}"
-                            )
-
-                        # -----------------------------------
-                        # Columna 3
-                        # -----------------------------------
-
-                        with col3:
-
-                            locacion = st.text_input(
-                                "Locación",
-                                value=str(
-                                    escena_data.get("Locación", "")
-                                ),
-                                key=f"locacion_{numero_escena}"
-                            )
-
-                            colores_stripboard = [
-                                "Blanco",
-                                "Amarillo",
-                                "Azul",
-                                "Verde",
-                                "Rosa",
-                                "Morado"
-                            ]
-
-                            color_actual = datos_guardados.get(
-                                "Color stripboard",
-                                color_sugerido
-                            )
-
-                            if color_actual not in colores_stripboard:
-                                color_actual = color_sugerido
-
-                            color_stripboard = st.selectbox(
-                                "Color stripboard",
-                                colores_stripboard,
-                                index=colores_stripboard.index(color_actual),
-                                key=f"color_stripboard_{numero_escena}"
-                            )
-
-                            estados_breakdown = [
-                                "Pendiente",
-                                "En proceso",
-                                "Revisado",
-                                "Listo para exportar"
-                            ]
-
-                            estado_actual = datos_guardados.get(
-                                "Estado breakdown",
-                                "Pendiente"
-                            )
-
-                            estado_breakdown = st.selectbox(
-                                "Estado del breakdown",
-                                estados_breakdown,
-                                index=estados_breakdown.index(estado_actual),
-                                key=f"estado_breakdown_{numero_escena}"
-                            )
-
-                        # -----------------------------------
-                        # Descripción y notas
-                        # -----------------------------------
-
-                        descripcion = st.text_area(
-                            "Descripción breve de la escena",
-                            value=datos_guardados.get(
-                                "Descripción",
-                                ""
-                            ),
-                            key=f"descripcion_escena_{numero_escena}"
-                        )
-
-                        notas_escena = st.text_area(
-                            "Notas de escena",
-                            value=datos_guardados.get(
-                                "Notas de escena",
-                                str(escena_data.get("Notas", ""))
-                            ),
-                            key=f"notas_escena_{numero_escena}"
-                        )
-
-                        guardar_datos_escena = st.form_submit_button(
-                            "Guardar datos de escena"
-                        )
-
-                        # -----------------------------------
-                        # Guardar
-                        # -----------------------------------
-
-                        if guardar_datos_escena:
-
-                            idx = st.session_state.scenes_df[
-                                st.session_state.scenes_df["Escena"].astype(str)
-                                == numero_escena
-                            ].index[0]
-
-                            st.session_state.scenes_df.at[
-                                idx,
-                                "Escena"
-                            ] = int(escena_numero)
-
-                            st.session_state.scenes_df.at[
-                                idx,
-                                "Encabezado de escena"
-                            ] = encabezado.upper()
-
-                            st.session_state.scenes_df.at[
-                                idx,
-                                "INT/EXT"
-                            ] = int_ext
-
-                            st.session_state.scenes_df.at[
-                                idx,
-                                "Tiempo"
-                            ] = tiempo.upper()
-
-                            st.session_state.scenes_df.at[
-                                idx,
-                                "Locación"
-                            ] = locacion.upper()
-
-                            st.session_state.scenes_df.at[
-                                idx,
-                                "Página"
-                            ] = pagina
-
-                            st.session_state.scenes_df.at[
-                                idx,
-                                "Octavos"
-                            ] = octavos
-
-                            st.session_state.scenes_df.at[
-                                idx,
-                                "Notas"
-                            ] = notas_escena
-
-                            st.session_state.breakdown_scene_data[
-                                str(escena_numero)
-                            ] = {
-
-                                "Escena": escena_numero,
-                                "Encabezado de escena": encabezado.upper(),
-                                "INT/EXT": int_ext,
-                                "Tiempo": tiempo.upper(),
-                                "Locación": locacion.upper(),
-                                "Página": pagina,
-                                "Octavos": octavos,
-                                "Color stripboard": color_stripboard,
-                                "Estado breakdown": estado_breakdown,
-                                "Descripción": descripcion,
-                                "Notas de escena": notas_escena
-                            }
-
-                            st.success(
-                                "Datos de escena guardados correctamente."
-                            )
-
-                    # -----------------------------------
-                    # Previsualización
-                    # -----------------------------------
-
-                    datos_preview = st.session_state.breakdown_scene_data.get(
-                        str(numero_escena),
-                        {}
-                    )
-
-                    escena_merged = {
-                        **escena_data,
-                        **datos_preview
-                    }
-
-                    octavos_preview = obtener_octavos_finales(escena_merged) or ""
-
-                    st.markdown(
-                        "### Previsualización de hoja de breakdown"
-                    )
-
-                    st.info(
-                        f"""
-                            PRODUCCIÓN: {st.session_state.project_info.get("nombre", "")}
-
-                            DIRECTOR/A: {st.session_state.project_info.get("director", "")}
-
-                            PRODUCTOR/A: {st.session_state.project_info.get("productor", "")}
-
-                            VERSIÓN DE GUIÓN: {st.session_state.project_info.get("version_guion", "")}
-
-                            --------------------------------------------------
-
-                            ESCENA: {datos_preview.get("Escena", escena_data.get("Escena", ""))}
-
-                            ENCABEZADO:
-                            {datos_preview.get("Encabezado de escena", escena_data.get("Encabezado de escena", ""))}
-
-                            INT/EXT:
-                            {datos_preview.get("INT/EXT", escena_data.get("INT/EXT", ""))}
-
-                            TIEMPO:
-                            {datos_preview.get("Tiempo", escena_data.get("Tiempo", ""))}
-
-                            LOCACIÓN:
-                            {datos_preview.get("Locación", escena_data.get("Locación", ""))}
-
-                            PÁGINA:
-                            {datos_preview.get("Página", escena_data.get("Página", ""))}
-
-                            OCTAVOS:
-                            {octavos_preview}
-
-                            COLOR STRIPBOARD:
-                            {datos_preview.get("Color stripboard", color_sugerido)}
-
-                            ESTADO:
-                            {datos_preview.get("Estado breakdown", "Pendiente")}
-
-                            --------------------------------------------------
-
-                            DESCRIPCIÓN:
-                            {datos_preview.get("Descripción", "")}
-
-                            --------------------------------------------------
-
-                            NOTAS:
-                            {datos_preview.get("Notas de escena", "")}
-                            """
-                    )
-
-                else:
-                    st.warning(
-                        "No se encontró la escena seleccionada."
-                    )
-
-            else:
-                st.warning("No hay escenas disponibles.")
+            render_scene_page()
 
         elif bd_menu == "Cast / Talento":
 
@@ -3823,11 +3648,11 @@ else:
                         sections=sections
                     )
 
-                    pdf_base64 = base64.b64encode(pdf_buffer_preview.read()).decode()
-
-                    st.markdown(
-                        f'<iframe src="data:application/pdf;base64,{pdf_base64}" type="application/pdf" width="100%" height="900" style="border: 1px solid #ddd; border-radius: 4px;"></iframe>',
-                        unsafe_allow_html=True
+                    render_screenplay_viewer(
+                        source_type="PDF",
+                        original_file_bytes=pdf_buffer_preview.getvalue(),
+                        filename=f"breakdown_escena_{numero_escena}.pdf",
+                        key=f"breakdown_pdf_{numero_escena}",
                     )
 
             else:
@@ -3841,168 +3666,16 @@ else:
      # ---------------------------------------------------------
 
     elif main_menu == "3. Stripboard":
-
-        st.markdown("# Stripboard")
-
-        strip_menu = st.sidebar.radio(
-            "Stripboard",
-            [
-                "Diseñar Strip",
-                "Stripboard completo"
-            ],
-            horizontal=False,
-            label_visibility="collapsed",
-            key="stripboard_sub_menu"
-        )
-
-        if strip_menu == "Diseñar Strip":
-
-            st.subheader("Diseñar Strip")
-
-            st.info(
-                "Aquí podrás editar los datos de cada escena y visualizar cómo se verá el strip antes de incorporarlo al Stripboard completo."
+        if render_stripboard_page is None:
+            st.error(
+                "No fue posible cargar el Stripboard. "
+                "Intenta reiniciar CinePlan o verifica la instalación del módulo."
             )
-
-            escenas_stripboard = []
-
-            for _, row in st.session_state.scenes_df.iterrows():
-                numero = str(row.get("Escena", ""))
-                encabezado = str(row.get("Encabezado de escena", ""))
-
-                escenas_stripboard.append(
-                    f"{numero} | {encabezado}"
+        else:
+            try:
+                render_stripboard_page()
+            except Exception:
+                st.error(
+                    "El Stripboard no pudo abrirse en este momento. "
+                    "Tus datos del proyecto no fueron modificados."
                 )
-
-            if escenas_stripboard:
-
-                escena_seleccionada_strip = st.selectbox(
-                    "Seleccionar escena",
-                    escenas_stripboard,
-                    key="stripboard_scene_selector"
-                )
-
-                numero_escena_strip = escena_seleccionada_strip.split(" | ")[0]
-
-                escena_df_strip = st.session_state.scenes_df[
-                    st.session_state.scenes_df["Escena"].astype(str) == numero_escena_strip
-                ]
-
-                if not escena_df_strip.empty:
-
-                    escena_strip_data = escena_df_strip.iloc[0]
-
-                    st.markdown("### Guía de colores recomendados")
-
-                    st.markdown(
-                        """
-                        ⚪ **INT Día** &nbsp; | &nbsp;
-                        🟡 **EXT Día** &nbsp; | &nbsp;
-                        🔵 **INT Noche** &nbsp; | &nbsp;
-                        🟢 **EXT Noche** &nbsp; | &nbsp;
-                        ⚫ **Separador** &nbsp; | &nbsp;
-                        🟠 **Atardecer** &nbsp; | &nbsp;
-                        🟣 **Especial**
-                        """
-                    )
-
-                    st.caption(
-                        'El color se asigna automáticamente desde "Datos de Escena", pero puede modificarse aquí para ajustar la clasificación visual del Stripboard y del Plan de Rodaje.'
-                    )
-                
-
-                    st.markdown("### Datos del Strip")
-
-                    datos_escena_strip = st.session_state.get(
-                        "breakdown_scene_data",
-                        {}
-                    ).get(
-                        str(numero_escena_strip),
-                        {}
-                    )
-
-                    strip_merged = {
-                        **escena_strip_data.to_dict(),
-                        **datos_escena_strip
-                    }
-
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        strip_int_ext = st.selectbox(
-                            "I/E",
-                            ["INT.", "EXT.", "I/E.", "ESPECIAL"],
-                            index=["INT.", "EXT.", "I/E.", "ESPECIAL"].index(
-                                strip_merged.get("INT/EXT", "INT.")
-                                if strip_merged.get("INT/EXT", "INT.") in ["INT.", "EXT.", "I/E.", "ESPECIAL"]
-                                else "INT."
-                            ),
-                            key=f"strip_int_ext_{numero_escena_strip}"
-                        )
-
-                        strip_lugar_escena = st.text_input(
-                            "Lugar de escena",
-                            value=str(strip_merged.get("Locación", "")),
-                            key=f"strip_lugar_escena_{numero_escena_strip}"
-                        )
-
-                        strip_locacion_rodaje = st.text_input(
-                            "Locación de rodaje",
-                            value=str(strip_merged.get("Locación rodaje", strip_merged.get("Locación", ""))),
-                            key=f"strip_locacion_rodaje_{numero_escena_strip}"
-                        )
-
-                    with col2:
-                        strip_tiempo = st.text_input(
-                            "Día / Noche / Tiempo",
-                            value=str(strip_merged.get("Tiempo", "")),
-                            key=f"strip_tiempo_{numero_escena_strip}"
-                        )
-
-                        strip_octavos = st.text_input(
-                            "Octavos",
-                            value=str(obtener_octavos_finales(strip_merged)),
-                            key=f"strip_octavos_{numero_escena_strip}"
-                        )
-
-                        colores_stripboard = [
-                            "Blanco",
-                            "Amarillo",
-                            "Azul",
-                            "Verde",
-                            "Negro",
-                            "Naranja",
-                            "Morado",
-                            "Rosa",
-                            "Gris"
-                        ]
-
-                        strip_color_actual = str(strip_merged.get("Color stripboard", "Blanco"))
-
-                        if strip_color_actual not in colores_stripboard:
-                            strip_color_actual = "Blanco"
-
-                        strip_color = st.selectbox(
-                            "Color Stripboard",
-                            colores_stripboard,
-                            index=colores_stripboard.index(strip_color_actual),
-                            key=f"strip_color_{numero_escena_strip}"
-                        )
-
-                    strip_descripcion = st.text_area(
-                        "Descripción breve",
-                        value=str(strip_merged.get("Descripción", "")),
-                        height=120,
-                        key=f"strip_descripcion_{numero_escena_strip}"
-                    )
-
-                    strip_cast = st.text_input(
-                        "Cast detectado",
-                        value=str(strip_merged.get("Personajes", "")),
-                        key=f"strip_cast_{numero_escena_strip}"
-                    )
-
-                else:
-                    st.warning("No se encontró la escena seleccionada.")
-
-            else:
-                st.warning("No hay escenas disponibles para Stripboard.")
